@@ -134,6 +134,7 @@ const byTs = (a,b)=>a.ts-b.ts;
 let DB=null, UID=null, base=null;
 const LS_KEY='reeflog.v1';
 function lastBackup(){ try{ return +localStorage.getItem('reeflog.lastBackup')||0 }catch(e){ return 0 } }
+function snoozeBackup(){ try{ localStorage.setItem('reeflog.lastBackup',Date.now()) }catch(e){} }
 function backupDue(){ return (S.tests.length+S.doses.length+S.events.length)>0 && Date.now()-lastBackup()>14*DAY }
 function lsLoad(){ try{ const j=JSON.parse(localStorage.getItem(LS_KEY)||'null'); if(j){ S.tests=j.tests||[]; S.doses=j.doses||[]; S.events=j.events||[]; S.settings=Object.assign(clone(DEF_SETTINGS),j.settings||{}) } }catch(e){} }
 function lsSave(){ try{ localStorage.setItem(LS_KEY,JSON.stringify({tests:S.tests,doses:S.doses,events:S.events,settings:S.settings})) }catch(e){} }
@@ -255,7 +256,7 @@ function render(){
   const sub=document.getElementById('hdrSub');
   sub.innerHTML = `${vol()} L netti<br>${S.mode==='db'?'☁︎ sincronizzato':'locale'}`;
   let h='';
-  if(S.mode==='local' && S.ready && backupDue()) h+=`<div class="banner">I dati sono salvati su questo dispositivo. ${lastBackup()?`Ultimo backup ${Math.floor((Date.now()-lastBackup())/DAY)} giorni fa`:'Non hai ancora fatto un backup'}: <a href="#" data-go="set" style="color:#ffd98a">esporta ora</a>.</div>`;
+  if(S.mode==='local' && S.ready && backupDue()) h+=`<div class="banner">I dati sono salvati su questo dispositivo. ${lastBackup()?`Ultimo backup ${Math.floor((Date.now()-lastBackup())/DAY)} giorni fa`:'Non hai ancora fatto un backup'}: <a href="#" data-go="set" style="color:#ffd98a">esporta ora</a>.<button id="bkClose" style="float:right;background:none;border:0;color:#ffd98a;font-size:18px;line-height:1;padding:0 0 0 10px">✕</button></div>`;
   if(S.mode==='db' && S.stale && !S.tests.length && !S.doses.length) h+=`<div class="banner">Caricamento dati…</div>`;
   h += ({home:vHome,test:vTest,dosi:vDosi,graf:vGraf,diario:vDiario,set:vSet})[view]();
   app.innerHTML=h;
@@ -516,6 +517,7 @@ function bind(){
   app.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{editTest=clone(S.tests.find(t=>t.id===b.dataset.edit));render();window.scrollTo(0,0)});
   app.querySelectorAll('[data-mode]').forEach(b=>b.onclick=async()=>{ if(S.settings.mode===b.dataset.mode) return; S.settings=Object.assign(clone(S.settings),{mode:b.dataset.mode}); await saveSettings(); toast(b.dataset.mode==='aio'?'Modalità All In One':'Modalità Balling 3 parti') });
   app.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>{go('diario')});
+  const bk=document.getElementById('bkClose'); if(bk) bk.onclick=()=>{ snoozeBackup(); render() };
   const ce=document.getElementById('cancelEdit'); if(ce) ce.onclick=()=>{editTest=null;render()};
 
   const fT=document.getElementById('fTest');
@@ -593,6 +595,7 @@ document.getElementById('fileIn').onchange=async e=>{
   for(const c of ['tests','doses','events']) for(const it of (j[c]||[])){ if(it&&it.id&&isFinite(it.ts)){ if(S.mode==='db'){ try{ await base.collection(c).doc(String(it.id)).set(it); n++ }catch(err){ handleErr(err); return } } else { const a=S[c]; const i=a.findIndex(x=>x.id===it.id); if(i>=0)a[i]=it; else a.push(it); n++ } } }
   if(j.settings){ S.settings=Object.assign(clone(DEF_SETTINGS),j.settings); await saveSettings() }
   if(S.mode==='local') lsSave();
+  snoozeBackup();
   toast(`Importati ${n} elementi`); render();
 };
 
