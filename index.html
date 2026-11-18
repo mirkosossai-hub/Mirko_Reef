@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reef Log</title>
+<meta name="theme-color" content="#07131c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--bg:#07131c;--card:#0f2230;--card2:#14303f;--line:#1f4153;--tx:#e6f1f6;--mut:#8aa7b6;--acc:#2ec4d6;--ok:#3fcf8e;--warn:#f4b942;--bad:#ef5d5d;--ca:#5aa9ff;--kh:#f08c3a;--mg:#b07cf2}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,#07131c 70%,#07131c00);padding:calc(env(safe-area-inset-top) + 12px) 16px 10px;display:flex;align-items:center;gap:10px}
+header h1{font-size:19px;margin:0;font-weight:700;letter-spacing:.3px}
+header .sub{color:var(--mut);font-size:12px;margin-left:auto;text-align:right}
+main{padding:0 12px calc(88px + env(safe-area-inset-bottom));max-width:720px;margin:0 auto}
+nav{position:fixed;bottom:0;left:0;right:0;z-index:6;display:flex;background:#0b1b26;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;border:0;color:var(--mut);padding:9px 0 8px;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px}
+nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8}
+nav button.on{color:var(--acc)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:10px 0}
+.card h2{font-size:14px;margin:0 0 10px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.6px;display:flex;align-items:center;gap:8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px}
+.tile{background:var(--card2);border-radius:11px;padding:9px 10px;border-left:4px solid var(--line)}
+.tile .k{font-size:12px;color:var(--mut)}
+.tile .v{font-size:21px;font-weight:700;margin-top:1px}
+.tile .v small{font-size:11px;color:var(--mut);font-weight:500}
+.tile .d{font-size:11px;color:var(--mut)}
+.s-ok{border-left-color:var(--ok)}.s-warn{border-left-color:var(--warn)}.s-bad{border-left-color:var(--bad)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.f{display:flex;flex-direction:column;gap:3px;flex:1;min-width:92px}
+.f label{font-size:12px;color:var(--mut)}
+input,select,textarea{background:#0a1a24;border:1px solid var(--line);color:var(--tx);border-radius:9px;padding:9px 10px;font:inherit;width:100%}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc)}
+textarea{min-height:60px;resize:vertical}
+.btn{background:var(--acc);color:#04222a;border:0;border-radius:10px;padding:11px 16px;font:inherit;font-weight:700}
+.btn.sec{background:var(--card2);color:var(--tx);border:1px solid var(--line);font-weight:600}
+.btn.sm{padding:6px 10px;font-size:13px}
+.btn.danger{background:#3a1717;color:#ffb4b4;border:1px solid #5a2323}
+.btn:disabled{opacity:.5}
+.list .it{display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--line);align-items:flex-start}
+.list .it:first-child{border-top:0}
+.it .when{min-width:58px;color:var(--mut);font-size:12px}
+.it .body{flex:1;font-size:14px}
+.it .acts{display:flex;gap:6px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.chip{background:var(--card2);border:1px solid var(--line);color:var(--tx);border-radius:999px;padding:6px 12px;font-size:13px}
+.chip.on{background:var(--acc);color:#04222a;border-color:var(--acc);font-weight:700}
+.mut{color:var(--mut)}.small{font-size:12px}
+.banner{background:#33270b;border:1px solid #6b5212;color:#ffd98a;border-radius:10px;padding:9px 12px;font-size:13px;margin:8px 0}
+.tri{display:grid;grid-template-columns:auto 1fr 1fr 1fr;gap:6px 10px;font-size:13px;align-items:center}
+.tri .h{color:var(--mut);font-size:11px;text-transform:uppercase}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px}
+.big{font-size:16px;font-weight:700}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));background:#e6f1f6;color:#07131c;padding:9px 16px;border-radius:999px;font-size:14px;font-weight:600;z-index:9;opacity:0;transition:.25s;pointer-events:none}
+.toast.on{opacity:1}
+canvas{max-width:100%}
+.hide{display:none!important}
+.tag{font-size:11px;padding:2px 7px;border-radius:999px;background:var(--card2);color:var(--mut);border:1px solid var(--line)}
+details summary{cursor:pointer;color:var(--acc);font-size:14px;margin:4px 0}
+hr{border:0;border-top:1px solid var(--line);margin:12px 0}
+</style>
+</head>
+<body>
+<header>
+  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2ec4d6" stroke-width="1.8"><path d="M3 18c3-2 6 2 9 0s6 2 9 0"/><path d="M8 15V9a2 2 0 1 1 4 0v6M12 12V6a2 2 0 1 1 4 0v9"/></svg>
+  <h1>Reef Log</h1>
+  <div class="sub" id="hdrSub"></div>
+</header>
+<main id="app"></main>
+<nav id="nav">
+  <button data-v="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9H3z"/></svg>Home</button>
+  <button data-v="test"><svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v6L5 19a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2l-5-10V3"/></svg>Test</button>
+  <button data-v="dosi"><svg viewBox="0 0 24 24"><path d="M12 3c3 4 6 7 6 11a6 6 0 0 1-12 0c0-4 3-7 6-11z"/></svg>Balling</button>
+  <button data-v="graf"><svg viewBox="0 0 24 24"><path d="M4 19h16M6 16l4-5 4 3 5-7"/></svg>Grafici</button>
+  <button data-v="diario"><svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M9 10h7M9 14h7"/></svg>Diario</button>
+  <button data-v="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Impost.</button>
+</nav>
+<div class="toast" id="toast"></div>
+<input type="file" id="fileIn" accept="application/json,.json" class="hide">
+
+<script>
+"use strict";
+/* ---------- Parametri ---------- */
+const P = {
+  kh:  {n:'KH',        u:'dKH', d:2, t:[7.5,9]},
+  ca:  {n:'Calcio',    u:'ppm', d:0, t:[400,450]},
+  mg:  {n:'Magnesio',  u:'ppm', d:0, t:[1250,1400]},
+  no3: {n:'Nitrati',   u:'ppm', d:1, t:[2,10]},
+  po4: {n:'Fosfati',   u:'ppm', d:3, t:[0.03,0.1]},
+  den: {n:'Densità',   u:'',    d:3, t:[1.024,1.026]},
+  ph:  {n:'pH',        u:'',    d:2, t:[7.9,8.4]},
+  temp:{n:'Temp.',     u:'°C',  d:1, t:[24,26.5]},
+  k:   {n:'Potassio',  u:'ppm', d:0, t:[380,420]},
+  nh4: {n:'Ammoniaca', u:'ppm', d:2, t:[0,0.05]},
+  no2: {n:'Nitriti',   u:'ppm', d:2, t:[0,0.05]},
+};
+const TRI = ['ca','kh','mg'];
+const TRI_COL = {ca:'#5aa9ff',kh:'#f08c3a',mg:'#b07cf2'};
+const DAY = 86400000;
+const DEF_SETTINGS = {
+  volume: 50,
+  mode: 'balling',
+  aio: {ca:'', kh:'', mg:''},
+  conc: {ca:19.5, kh:1.0, mg:''},
+  salt: {ca:'', kh:'', mg:''},
+  targets: {},
+  showParams: ['kh','ca','mg','no3','po4','den','ph','temp'],
+};
+
+/* ---------- Stato ---------- */
+const S = {tests:[], doses:[], events:[], settings:clone(DEF_SETTINGS), mode:'local', ready:false, stale:false};
+let view = 'home', editTest = null, grafParam = 'kh', grafRange = 90, confirmKey = null;
+const charts = {};
+
+function clone(o){return JSON.parse(JSON.stringify(o))}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8)}
+function num(v){ if(v===''||v==null) return null; const n = typeof v==='number'?v:parseFloat(String(v).replace(',','.')); return isFinite(n)?n:null }
+function fmt(v,d){ if(v==null||!isFinite(v)) return '–'; return v.toLocaleString('it-IT',{minimumFractionDigits:0,maximumFractionDigits:d}) }
+function fdate(ts,y){ return new Date(ts).toLocaleDateString('it-IT',y?{day:'2-digit',month:'short',year:'2-digit'}:{day:'2-digit',month:'short'}) }
+function ftime(ts){ return new Date(ts).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}) }
+function toInput(ts){ const d=new Date(ts); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,16) }
+function fromInput(s){ const t = new Date(s).getTime(); return isFinite(t)?t:Date.now() }
+function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+function tgt(p){ const t=S.settings.targets?.[p]; return (t&&t.length===2&&num(t[0])!=null&&num(t[1])!=null)?[num(t[0]),num(t[1])]:P[p].t }
+function vol(){ return num(S.settings.volume)||50 }
+function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('on'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('on'),1900) }
+const byTs = (a,b)=>a.ts-b.ts;
+
+/* ---------- Storage (db del Claude artifact, fallback locale) ---------- */
+let DB=null, UID=null, base=null;
+const LS_KEY='reeflog.v1';
+function lastBackup(){ try{ return +localStorage.getItem('reeflog.lastBackup')||0 }catch(e){ return 0 } }
+function backupDue(){ return (S.tests.length+S.doses.length+S.events.length)>0 && Date.now()-lastBackup()>14*DAY }
+function lsLoad(){ try{ const j=JSON.parse(localStorage.getItem(LS_KEY)||'null'); if(j){ S.tests=j.tests||[]; S.doses=j.doses||[]; S.events=j.events||[]; S.settings=Object.assign(clone(DEF_SETTINGS),j.settings||{}) } }catch(e){} }
+function lsSave(){ try{ localStorage.setItem(LS_KEY,JSON.stringify({tests:S.tests,doses:S.doses,events:S.events,settings:S.settings})) }catch(e){} }
+
+async function saveItem(coll,item){
+  if(S.mode==='db'){
+    try{ await base.collection(coll).doc(item.id).set(item) }
+    catch(e){ handleErr(e); return false }
+  }else{
+    const arr=S[coll]; const i=arr.findIndex(x=>x.id===item.id); if(i>=0) arr[i]=item; else arr.push(item); lsSave(); render();
+  }
+  return true;
+}
+async function delItem(coll,id){
+  if(S.mode==='db'){ try{ await base.collection(coll).doc(id).delete() }catch(e){ handleErr(e) } }
+  else{ S[coll]=S[coll].filter(x=>x.id!==id); lsSave(); render() }
+}
+async function saveSettings(){
+  if(S.mode==='db'){ try{ await DB.doc(`data/users/${UID}/settings`).set(clone(S.settings)) }catch(e){ handleErr(e); return } }
+  else lsSave();
+  render();
+}
+function handleErr(e){
+  const c=e&&e.code;
+  if(c==='quota_exceeded') toast('Spazio dati esaurito: esporta un backup');
+  else if(c==='unavailable') toast('Connessione assente, riprova');
+  else toast('Salvataggio non riuscito');
+}
+
+async function initStore(){
+  lsLoad(); S.ready=true; render();
+  try{
+    if(!window.claude||!window.claude.use) return;
+    const [db,user]=await Promise.all([window.claude.use('db'),window.claude.use('user')]);
+    const id = user ? await user.id() : null;
+    if(!db||!id){ render(); return }
+    DB=db; UID=id; base=db.doc(`data/users/${id}/main`); S.mode='db';
+    S.tests=[];S.doses=[];S.events=[];S.settings=clone(DEF_SETTINGS); S.stale=true;
+    const pending=new Set(['tests','doses','events','settings']);
+    const timer=setTimeout(()=>{ if(pending.size){ S.stale=true; toast('Dati non ancora raggiungibili…'); render() } },10000);
+    const done=(k,snap)=>{ if(!snap.metadata.fromCache){ pending.delete(k); if(!pending.size){ clearTimeout(timer); S.stale=false } } };
+    for(const c of ['tests','doses','events']){
+      base.collection(c).onSnapshot(snap=>{ S[c]=snap.docs.map(d=>clone(d.data())); done(c,snap); scheduleRender() },
+        e=>{ pending.delete(c); handleErr(e) });
+    }
+    db.doc(`data/users/${id}/settings`).onSnapshot(snap=>{
+      if(snap.exists) S.settings=Object.assign(clone(DEF_SETTINGS),clone(snap.data()));
+      done('settings',snap); scheduleRender()
+    },e=>{ pending.delete('settings'); handleErr(e) });
+    render();
+  }catch(e){ render() }
+}
+let _rq=false; function scheduleRender(){ if(_rq) return; _rq=true; requestAnimationFrame(()=>{ _rq=false; if(!isTyping()) render(); else _pendingRender=true }) }
+let _pendingRender=false;
+function isTyping(){ const a=document.activeElement; return a && (a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT') && a.closest('form') }
+document.addEventListener('focusout',()=>{ setTimeout(()=>{ if(_pendingRender && !isTyping()){ _pendingRender=false; render() } },50) });
+
+/* ---------- Calcoli triade ---------- */
+function isAIO(){ return S.settings.mode==='aio' }
+function ballEff(p){ // aumento del parametro (unità parametro · L) per ml di soluzione Balling
+  const c=num(S.settings.conc?.[p]); if(c==null||c<=0) return null;
+  return p==='kh' ? c*2.8 : c; // KH: meq/ml → dKH·L (1 meq/L = 2,8 dKH)
+}
+function aioEff(p){ // AIO: "1 ml in 100 L alza di X" → X·100 (unità·L per ml)
+  const c=num(S.settings.aio?.[p]); if(c==null||c<=0) return null; return c*100;
+}
+function effPerMl(p){ return isAIO()? aioEff(p) : ballEff(p) }
+function testsWith(p){ return S.tests.filter(t=>num(t.v?.[p])!=null).sort(byTs) }
+function regimens(){ return [...S.doses].sort(byTs) }
+function curReg(ts){ let r=null; for(const d of regimens()){ if(d.ts<=ts) r=d; else break } return r }
+// ml/g del prodotto che fornisce p secondo la modalità attuale
+function rateAt(p,ts){ const r=curReg(ts); if(!r) return 0; if(isAIO()) return r.kind==='aio'?(num(r.aio)||0):0; return r.kind==='aio'?0:(num(r[p])||0) }
+// effetto di un record (regime → per giorno, evento → totale) sul parametro p; null se manca la concentrazione
+function recEffect(rec,p){
+  if(rec.kind==='aio'){ const ml=num(rec.aio)||0; if(!ml) return {ml:0,eff:0}; const e=aioEff(p); return {ml,eff:e==null?null:ml*e} }
+  const ml=num(rec[p])||0; if(!ml) return {ml:0,eff:0}; const e=ballEff(p); return {ml,eff:e==null?null:ml*e};
+}
+function addedBetween(p,t1,t2){ // ritorna {ml, add (unità·L) | null}
+  const R=regimens(); let ml=0, add=0, ok=true;
+  for(let i=0;i<R.length;i++){
+    const s=R[i].ts, e=i+1<R.length?R[i+1].ts:Infinity;
+    const ov=Math.min(e,t2)-Math.max(s,t1);
+    if(ov>0){ const r=recEffect(R[i],p); ml+=r.ml*ov/DAY; if(r.eff==null) ok=false; else add+=r.eff*ov/DAY }
+  }
+  for(const ev of S.events) if(ev.type==='dose' && ev.ts>t1 && ev.ts<=t2){ const r=recEffect(ev,p); ml+=r.ml; if(r.eff==null) ok=false; else add+=r.eff }
+  return {ml, add: ok?add:null};
+}
+function intervals(p){
+  const T=testsWith(p), V=vol(), out=[];
+  for(let i=1;i<T.length;i++){
+    const a=T[i-1], b=T[i], days=(b.ts-a.ts)/DAY; if(days<0.25) continue;
+    const c1=num(a.v[p]), c2=num(b.v[p]);
+    const ab=addedBetween(p,a.ts,b.ts), ml=ab.ml;
+    const added = ab.add!=null ? ab.add/V : null;
+    let wc=0; const sn=num(S.settings.salt?.[p]);
+    for(const ev of S.events){
+      if(ev.type!=='wc'||!(ev.ts>a.ts&&ev.ts<=b.ts)) continue;
+      const L=num(ev.liters); if(!L) continue;
+      if(sn!=null){ const ci=c1+(c2-c1)*(ev.ts-a.ts)/(b.ts-a.ts); wc+=(L/V)*(sn-ci) }
+    }
+    const cons = added!=null ? (c1+added+wc-c2)/days : null;
+    out.push({t1:a.ts,t2:b.ts,days,c1,c2,ml,added,wc,cons,mid:(a.ts+b.ts)/2});
+  }
+  return out;
+}
+function avgCons(p,daysBack=30){
+  const I=intervals(p).filter(x=>x.cons!=null); if(!I.length) return null;
+  const last=I[I.length-1].t2, from=last-daysBack*DAY;
+  let w=0,s=0; for(const x of I){ const ov=Math.min(x.t2,last)-Math.max(x.t1,from); if(ov>0){ s+=x.cons*ov; w+=ov } }
+  return w? s/w : I[I.length-1].cons;
+}
+function lastVal(p){ const T=testsWith(p); return T.length?{v:num(T[T.length-1].v[p]),ts:T[T.length-1].ts, prev:T.length>1?num(T[T.length-2].v[p]):null}:null }
+function status(p,v){ const [lo,hi]=tgt(p); if(v==null) return ''; if(v>=lo&&v<=hi) return 's-ok'; const span=(hi-lo)||Math.abs(hi)||1; return (v<lo-span*0.5||v>hi+span*0.5)?'s-bad':'s-warn' }
+
+/* ---------- Render ---------- */
+function render(){
+  const app=document.getElementById('app');
+  Object.values(charts).forEach(c=>c.destroy()); for(const k in charts) delete charts[k];
+  const sub=document.getElementById('hdrSub');
+  sub.innerHTML = `${vol()} L netti<br>${S.mode==='db'?'☁︎ sincronizzato':'locale'}`;
+  let h='';
+  if(S.mode==='local' && S.ready && backupDue()) h+=`<div class="banner">I dati sono salvati su questo dispositivo. ${lastBackup()?`Ultimo backup ${Math.floor((Date.now()-lastBackup())/DAY)} giorni fa`:'Non hai ancora fatto un backup'}: <a href="#" data-go="set" style="color:#ffd98a">esporta ora</a>.</div>`;
+  if(S.mode==='db' && S.stale && !S.tests.length && !S.doses.length) h+=`<div class="banner">Caricamento dati…</div>`;
+  h += ({home:vHome,test:vTest,dosi:vDosi,graf:vGraf,diario:vDiario,set:vSet})[view]();
+  app.innerHTML=h;
+  bind();
+  if(view==='graf') drawCharts();
+  if(view==='home') drawSpark();
+}
+
+function vHome(){
+  const lt = S.tests.length? Math.max(...S.tests.map(t=>t.ts)) : null;
+  let h=`<div class="card"><h2>Ultimi valori ${lt?`<span class="tag">ultimo test ${Math.floor((Date.now()-lt)/DAY)===0?'oggi':Math.floor((Date.now()-lt)/DAY)+' gg fa'}</span>`:''}</h2>`;
+  const ps=(S.settings.showParams||Object.keys(P)).filter(p=>P[p]);
+  if(!S.tests.length) h+=`<p class="mut">Nessun test registrato. <button class="btn sm" data-go="test">Inserisci il primo test</button></p>`;
+  else{
+    h+=`<div class="grid">`;
+    for(const p of ps){ const l=lastVal(p); if(!l) continue;
+      const dd = l.prev!=null? l.v-l.prev : null;
+      h+=`<div class="tile ${status(p,l.v)}" data-graf="${p}"><div class="k">${P[p].n}</div><div class="v">${fmt(l.v,P[p].d)} <small>${P[p].u}</small></div><div class="d">${fdate(l.ts)}${dd!=null?` · ${dd>0?'+':''}${fmt(dd,P[p].d)}`:''}</div></div>` }
+    h+=`</div>`;
+  }
+  h+=`</div>`;
+  // Triade
+  h+=`<div class="card"><h2>Triade · ${isAIO()?'All In One':'Balling'}</h2><div class="tri"><div></div><div class="h">Dose attuale</div><div class="h">Consumo/g</div><div class="h">${isAIO()?'AIO per coprirlo':'Dose suggerita'}</div>`;
+  for(const p of TRI){
+    const eff=effPerMl(p), cons=avgCons(p), r=rateAt(p,Date.now());
+    const sugg = (cons!=null&&eff)? Math.max(0,cons*vol()/eff) : null;
+    h+=`<div><span class="dot" style="background:${TRI_COL[p]}"></span><b>${P[p].n}</b></div>
+        <div class="big">${fmt(r,1)} <small class="mut">ml/g</small></div>
+        <div>${cons!=null?`${fmt(cons,p==='kh'?2:1)} <small class="mut">${P[p].u}</small>`:'<span class="mut">–</span>'}</div>
+        <div>${sugg!=null?`<b>${fmt(sugg,1)}</b> <small class="mut">ml/g</small>`:'<span class="mut">–</span>'}</div>`;
+  }
+  h+=`</div>`;
+  if(isAIO()){
+    const s={}; for(const p of TRI){ const c=avgCons(p), e=aioEff(p); s[p]=(c!=null&&e)?Math.max(0,c*vol()/e):null }
+    if(s.kh!=null){
+      const r=rateAt('kh',Date.now());
+      h+=`<hr><div class="small">Dose AIO suggerita (sul consumo di KH): <b class="big">${fmt(s.kh,1)} ml/g</b> <span class="mut">(attuale ${fmt(r,1)})</span>`;
+      const notes=[];
+      for(const p of ['ca','mg']){ if(s[p]==null||s.kh<=0) continue; const d=(s.kh-s[p])/s[p];
+        if(Math.abs(d)>0.25) notes.push(`${P[p].n} ${d>0?'andrebbe in <b>accumulo</b>':'tenderebbe a <b>calare</b>'} (copre il ${fmt(100*s.kh/s[p],0)}% del consumo)`) }
+      h+= notes.length?`<div style="margin-top:4px;color:var(--warn)">Con questa dose: ${notes.join('; ')}. Valuta un'integrazione singola nel Diario.</div>`:`<div class="mut" style="margin-top:4px">Ca e Mg risultano in equilibrio con il KH.</div>`;
+      h+=`</div>`;
+    }
+  }
+  const cCa=avgCons('ca'), cKh=avgCons('kh');
+  if(cCa!=null&&cKh!=null&&cKh>0.05){
+    const ratio=cCa/cKh;
+    h+=`<hr><div class="small">Rapporto consumi Ca/KH: <b>${fmt(ratio,1)}</b> ppm per dKH <span class="mut">(teorico ≈ 7,1 se il consumo è solo da calcificazione)</span>${ratio<5||ratio>9.5?' <span style="color:var(--warn)">· scostamento ampio: verifica test o precipitazioni</span>':''}</div>`;
+  }
+  // correzioni
+  let corr='';
+  for(const p of TRI){ const l=lastVal(p), eff=effPerMl(p); if(!l||!eff) continue; const [lo,hi]=tgt(p); const mid=(lo+hi)/2;
+    if(l.v<lo){ const ml=(mid-l.v)*vol()/eff; corr+=`<div>• ${P[p].n}: ${fmt(l.v,P[p].d)} sotto target → circa <b>${fmt(ml,0)} ml${isAIO()?' di AIO':''}</b> una tantum per arrivare a ${fmt(mid,P[p].d)}${p==='kh'&&(mid-l.v)>1?` <span class="mut">(dividi in ${Math.ceil(mid-l.v)} giorni: max ~1 dKH/giorno)</span>`:''}</div>` } }
+  if(corr) h+=`<hr><div class="small"><div class="mut" style="margin-bottom:4px">Correzioni suggerite</div>${corr}</div>`;
+  if(!effPerMl('mg')||!effPerMl('ca')) h+=`<hr><div class="small mut">Imposta la concentrazione delle soluzioni in <a href="#" data-go="set" style="color:var(--acc)">Impostazioni</a> per calcolare consumi e dosi.</div>`;
+  h+=`<div class="small mut" style="margin-top:8px">Consumo = media pesata degli ultimi 30 gg tra test consecutivi, al netto di dosi e cambi d'acqua.</div></div>`;
+  h+=`<div class="card"><h2>KH ultimi 60 giorni</h2><canvas id="spark" height="120"></canvas></div>`;
+  // promemoria
+  const lastWc=S.events.filter(e=>e.type==='wc').sort(byTs).pop();
+  h+=`<div class="card"><h2>Promemoria</h2><div class="small">`;
+  h+= lastWc?`Ultimo cambio d'acqua: <b>${fdate(lastWc.ts)}</b> (${Math.floor((Date.now()-lastWc.ts)/DAY)} gg fa, ${fmt(num(lastWc.liters),1)} L)`:'Nessun cambio d\'acqua registrato.';
+  const lt2=S.tests.length? Math.floor((Date.now()-Math.max(...S.tests.map(t=>t.ts)))/DAY):null;
+  if(lt2!=null&&lt2>=7) h+=`<br><span style="color:var(--warn)">Sono passati ${lt2} giorni dall'ultimo test.</span>`;
+  h+=`</div><div class="row" style="margin-top:10px"><button class="btn sm" data-go="test">+ Test</button><button class="btn sm sec" data-quick="wc">+ Cambio acqua</button><button class="btn sm sec" data-go="dosi">Modifica dosi</button></div></div>`;
+  return h;
+}
+
+function vTest(){
+  const t=editTest||{id:null,ts:Date.now(),v:{},note:''};
+  const ps=Object.keys(P);
+  let h=`<div class="card"><h2>${editTest?'Modifica test':'Nuovo test'}</h2><form id="fTest">
+    <div class="f" style="margin-bottom:8px"><label>Data e ora</label><input type="datetime-local" name="ts" value="${toInput(t.ts)}"></div>
+    <div class="grid">`;
+  for(const p of ps){ const last=lastVal(p);
+    h+=`<div class="f"><label>${P[p].n}${P[p].u?' ('+P[p].u+')':''}</label><input name="${p}" inputmode="decimal" autocomplete="off" value="${t.v[p]!=null?esc(String(t.v[p]).replace('.',',')):''}" placeholder="${last?fmt(last.v,P[p].d):''}"></div>` }
+  h+=`</div><div class="f" style="margin-top:8px"><label>Note (kit usato, osservazioni…)</label><textarea name="note">${esc(t.note)}</textarea></div>
+    <div class="row" style="margin-top:10px"><button class="btn" type="submit">Salva test</button>${editTest?'<button class="btn sec" type="button" id="cancelEdit">Annulla</button>':''}</div>
+    <div class="small mut" style="margin-top:6px">Compila solo i parametri misurati. Il segnaposto mostra l'ultimo valore.</div></form></div>`;
+  h+=`<div class="card"><h2>Storico test (${S.tests.length})</h2><div class="list">`;
+  const T=[...S.tests].sort((a,b)=>b.ts-a.ts);
+  if(!T.length) h+=`<p class="mut">Nessun test.</p>`;
+  for(const x of T){
+    const vals=Object.keys(x.v||{}).filter(p=>P[p]&&num(x.v[p])!=null).map(p=>`<span class="${status(p,num(x.v[p]))}" style="border-left:3px solid;padding-left:4px;margin-right:8px;white-space:nowrap">${P[p].n} <b>${fmt(num(x.v[p]),P[p].d)}</b></span>`).join(' ');
+    h+=`<div class="it"><div class="when">${fdate(x.ts,true)}<br>${ftime(x.ts)}</div><div class="body">${vals}${x.note?`<div class="mut small" style="margin-top:3px">${esc(x.note)}</div>`:''}</div>
+      <div class="acts"><button class="btn sm sec" data-edit="${x.id}">✎</button>${delBtn('tests',x.id)}</div></div>`;
+  }
+  return h+`</div></div>`;
+}
+function delBtn(coll,id){ const k=coll+':'+id; return confirmKey===k?`<button class="btn sm danger" data-del="${k}">Elimina?</button>`:`<button class="btn sm sec" data-ask="${k}">🗑</button>` }
+
+function vDosi(){
+  const cur={ca:rateAt('ca',Date.now()),kh:rateAt('kh',Date.now()),mg:rateAt('mg',Date.now())};
+  const aio=isAIO();
+  let h=`<div class="card"><h2>Metodo</h2><div class="chips" style="margin:0">
+    <button class="chip ${!aio?'on':''}" data-mode="balling">Balling 3 parti</button><button class="chip ${aio?'on':''}" data-mode="aio">All In One</button></div>
+    <div class="small mut" style="margin-top:6px">${aio?'Unica soluzione che apporta Ca, KH e Mg insieme (tipica dei nano reef).':'Tre soluzioni separate per Ca, KH e Mg.'} Puoi cambiare metodo quando vuoi: lo storico resta valido.</div></div>`;
+  h+=`<div class="card"><h2>Dose giornaliera attuale</h2>`;
+  if(aio) h+=`<div class="big" style="font-size:24px">${fmt(cur.kh,1)} <small class="mut">ml/g di All In One</small></div>`;
+  h+=`<div class="grid" style="margin-top:8px">`;
+  for(const p of TRI) h+=`<div class="tile" style="border-left-color:${TRI_COL[p]}"><div class="k">${P[p].n}</div><div class="v">${aio?'':fmt(cur[p],1)+' <small>ml/g</small>'}${aio&&effPerMl(p)?fmt(cur[p]*effPerMl(p)/vol(),p==='kh'?3:1)+` <small>${P[p].u}/g</small>`:''}</div><div class="d">${effPerMl(p)?(aio?'apporto giornaliero':`≈ ${fmt(cur[p]*effPerMl(p)/vol(),p==='kh'?3:2)} ${P[p].u}/g`):'conc. non impostata'}</div></div>`;
+  h+=`</div></div>`;
+  h+=`<div class="card"><h2>Imposta nuova dose</h2><form id="fDose">
+    <div class="f" style="margin-bottom:8px"><label>In vigore da</label><input type="datetime-local" name="ts" value="${toInput(Date.now())}"></div>
+    <div class="row">${aio?`<div class="f"><label>All In One ml/g</label><input name="aio" inputmode="decimal" value="${String(cur.kh).replace('.',',')}"></div>`:TRI.map(p=>`<div class="f"><label>${P[p].n} ml/g</label><input name="${p}" inputmode="decimal" value="${String(cur[p]).replace('.',',')}"></div>`).join('')}</div>
+    <div class="f" style="margin-top:8px"><label>Nota</label><input name="note" placeholder="es. aumento KH dopo calo"></div>
+    <div class="row" style="margin-top:10px"><button class="btn" type="submit">Salva dose</button></div>
+    <div class="small mut" style="margin-top:6px">Registra ogni variazione della pompa dosometrica: l'app integra le dosi nel tempo per calcolare i consumi. Le dosi manuali una tantum vanno nel Diario.</div>
+  </form></div>`;
+  h+=`<div class="card"><h2>Storico variazioni</h2><div class="list">`;
+  const R=[...S.doses].sort((a,b)=>b.ts-a.ts);
+  if(!R.length) h+=`<p class="mut">Nessuna dose registrata.</p>`;
+  for(const d of R) h+=`<div class="it"><div class="when">${fdate(d.ts,true)}</div><div class="body">${d.kind==='aio'?`<span class="tag">AIO</span> <b>${fmt(num(d.aio)||0,1)} ml</b>`:TRI.map(p=>`<span style="margin-right:10px"><span class="dot" style="background:${TRI_COL[p]}"></span>${fmt(num(d[p])||0,1)} ml</span>`).join('')}${d.note?`<div class="mut small">${esc(d.note)}</div>`:''}</div><div class="acts">${delBtn('doses',d.id)}</div></div>`;
+  h+=`</div></div>`;
+  // tabella intervalli
+  h+=`<div class="card"><h2>Bilancio tra test</h2>`;
+  for(const p of TRI){ const I=intervals(p).slice(-6).reverse(); if(!I.length) continue;
+    h+=`<div style="margin:6px 0 4px"><span class="dot" style="background:${TRI_COL[p]}"></span><b>${P[p].n}</b></div><div class="list small">`;
+    for(const x of I) h+=`<div class="it"><div class="when">${fdate(x.t1)}→${fdate(x.t2)}</div><div class="body">${fmt(x.c1,P[p].d)} → ${fmt(x.c2,P[p].d)} · dosati ${fmt(x.ml,0)} ml${x.added!=null?` (+${fmt(x.added,P[p].d+1)})`:''}${x.wc?` · cambi ${x.wc>0?'+':''}${fmt(x.wc,P[p].d+1)}`:''}<br>Consumo: <b>${x.cons!=null?fmt(x.cons,p==='kh'?2:1)+' '+P[p].u+'/g':'–'}</b></div></div>`;
+    h+=`</div>`;
+  }
+  if(!TRI.some(p=>intervals(p).length)) h+=`<p class="mut small">Servono almeno due test dello stesso parametro.</p>`;
+  return h+`</div>`;
+}
+
+function shownParams(){ return (S.settings.showParams||Object.keys(P)).filter(p=>P[p]) }
+function vGraf(){
+  let h=`<div class="card" style="position:sticky;top:58px;z-index:4"><div class="chips" style="margin:0">${[[30,'30 gg'],[90,'3 mesi'],[365,'1 anno'],[0,'Tutto']].map(([d,l])=>`<button class="chip ${d===grafRange?'on':''}" data-gr="${d}">${l}</button>`).join('')}</div></div>`;
+  const ps=shownParams();
+  if(!ps.length) h+=`<div class="card mut">Nessun parametro selezionato: spuntali in Impostazioni → Range obiettivo.</div>`;
+  for(const p of ps){ const n=testsWith(p).length;
+    h+=`<div class="card" id="g_${p}"><h2>${P[p].n} ${P[p].u?'('+P[p].u+')':''} <span class="tag">${n} test</span></h2>${n?`<canvas id="cv_${p}" height="150"></canvas>`:'<p class="mut small">Nessun test registrato per questo parametro.</p>'}</div>`;
+  }
+  h+=`<div class="card"><h2>Consumo giornaliero triade</h2><canvas id="cCons" height="200"></canvas><div class="small mut">Ca e Mg in ppm/g (asse sinistro), KH in dKH/g (asse destro).</div></div>`;
+  h+=`<div class="card"><h2>Dosi (ml/g)</h2><canvas id="cDose" height="170"></canvas></div>`;
+  return h;
+}
+
+function vDiario(){
+  let h=`<div class="card"><h2>Nuova voce</h2><form id="fEv">
+    <div class="row"><div class="f"><label>Tipo</label><select name="type" id="evType">
+      <option value="wc">Cambio d'acqua</option><option value="dose">Dose manuale (una tantum)</option><option value="maint">Manutenzione</option><option value="live">Inserimento animali/coralli</option><option value="note">Nota</option></select></div>
+      <div class="f"><label>Data</label><input type="datetime-local" name="ts" value="${toInput(Date.now())}"></div></div>
+    <div id="evWc" class="row" style="margin-top:8px"><div class="f"><label>Litri cambiati</label><input name="liters" inputmode="decimal"></div></div>
+    <div id="evDose" class="row hide" style="margin-top:8px">${isAIO()?`<div class="f"><label>All In One ml</label><input name="aio" inputmode="decimal"></div>`:''}${TRI.map(p=>`<div class="f"><label>${P[p].n} ml${isAIO()?' (Balling singolo)':''}</label><input name="${p}" inputmode="decimal"></div>`).join('')}</div>
+    <div class="f" style="margin-top:8px"><label>Descrizione</label><input name="note" placeholder="es. pulizia schiumatoio, cambio resine osmosi, TDS 0"></div>
+    <div class="row" style="margin-top:10px"><button class="btn" type="submit">Aggiungi</button></div></form></div>`;
+  const lab={wc:"Cambio d'acqua",dose:'Dose manuale',maint:'Manutenzione',live:'Inserimento',note:'Nota'};
+  h+=`<div class="card"><h2>Diario</h2><div class="list">`;
+  const E=[...S.events].sort((a,b)=>b.ts-a.ts);
+  if(!E.length) h+=`<p class="mut">Nessuna voce.</p>`;
+  for(const e of E){
+    let d=''; if(e.type==='wc') d=`${fmt(num(e.liters),1)} L (${fmt(100*(num(e.liters)||0)/vol(),0)}%)`;
+    if(e.type==='dose') d= e.kind==='aio' ? `All In One ${fmt(num(e.aio),1)} ml` : TRI.filter(p=>num(e[p])).map(p=>`${P[p].n} ${fmt(num(e[p]),1)} ml`).join(' · ');
+    h+=`<div class="it"><div class="when">${fdate(e.ts,true)}</div><div class="body"><span class="tag">${lab[e.type]||e.type}</span> ${d}${e.note?`<div class="small">${esc(e.note)}</div>`:''}</div><div class="acts">${delBtn('events',e.id)}</div></div>`;
+  }
+  return h+`</div></div>`;
+}
+
+function vSet(){
+  const s=S.settings;
+  let h=`<form id="fSet"><div class="card"><h2>Vasca</h2>
+    <div class="row"><div class="f"><label>Volume netto d'acqua (L)</label><input name="volume" inputmode="decimal" value="${esc(String(s.volume).replace('.',','))}"></div></div>
+    <div class="small mut" style="margin-top:4px">Volume reale (vasca + sump, tolte rocce e sabbia). Influisce su tutti i calcoli.</div></div>
+  <div class="card"><h2>All In One</h2>
+    <div class="small mut" style="margin-bottom:6px">Dati dall'etichetta del prodotto: di quanto alza <b>1 ml in 100 L</b>.</div>
+    <div class="row">${TRI.map(p=>`<div class="f"><label>${P[p].n} (${P[p].u})</label><input name="a_${p}" inputmode="decimal" value="${esc(String(s.aio?.[p]??'').replace('.',','))}"></div>`).join('')}</div>
+    <div class="small mut" style="margin-top:4px">Se l'etichetta indica altri volumi (es. 1 ml in 50 L), converti: valore × 50 / 100.</div></div>
+  <div class="card"><h2>Soluzioni Balling 3 parti</h2>
+    <div class="row">
+      <div class="f"><label>Calcio: mg Ca per ml</label><input name="c_ca" inputmode="decimal" value="${esc(String(s.conc.ca??'').replace('.',','))}"></div>
+      <div class="f"><label>KH: meq per ml</label><input name="c_kh" inputmode="decimal" value="${esc(String(s.conc.kh??'').replace('.',','))}"></div>
+      <div class="f"><label>Magnesio: mg Mg per ml</label><input name="c_mg" inputmode="decimal" value="${esc(String(s.conc.mg??'').replace('.',','))}"></div>
+    </div>
+    <details><summary>Calcola dalla ricetta (g di sale per litro)</summary>
+      <div class="row" style="margin-top:6px">
+        <div class="f"><label>CaCl₂·2H₂O g/L</label><input id="r_ca" inputmode="decimal" placeholder="71,5"></div>
+        <div class="f"><label>NaHCO₃ g/L</label><input id="r_hco3" inputmode="decimal" placeholder="84"></div>
+        <div class="f"><label>Na₂CO₃ g/L</label><input id="r_co3" inputmode="decimal" placeholder=""></div>
+      </div><div class="row" style="margin-top:6px">
+        <div class="f"><label>MgCl₂·6H₂O g/L</label><input id="r_mgcl" inputmode="decimal"></div>
+        <div class="f"><label>MgSO₄·7H₂O g/L</label><input id="r_mgso" inputmode="decimal"></div>
+      </div>
+      <button type="button" class="btn sm sec" id="calcRecipe" style="margin-top:8px">Calcola e applica</button>
+      <div class="small mut" style="margin-top:4px">Balling commerciale: se "1 ml in 100 L alza Ca/Mg di X ppm" → mg/ml = X × 100; se alza il KH di Y dKH → meq/ml = Y × 100 / 2,8.</div>
+    </details></div>
+  <div class="card"><h2>Acqua del cambio (sale)</h2>
+    <div class="row">${TRI.map(p=>`<div class="f"><label>${P[p].n} (${P[p].u})</label><input name="s_${p}" inputmode="decimal" value="${esc(String(s.salt?.[p]??'').replace('.',','))}"></div>`).join('')}</div>
+    <div class="small mut" style="margin-top:4px">Facoltativo: se compilato, l'effetto dei cambi d'acqua viene sottratto dal calcolo dei consumi.</div></div>
+  <div class="card"><h2>Range obiettivo</h2>`;
+  for(const p of Object.keys(P)){ const [lo,hi]=tgt(p); const show=(s.showParams||[]).includes(p);
+    h+=`<div class="row" style="margin-bottom:6px"><label style="min-width:96px;font-size:13px"><input type="checkbox" name="show_${p}" ${show?'checked':''} style="width:auto;margin-right:6px">${P[p].n}</label>
+      <input name="lo_${p}" inputmode="decimal" value="${String(lo).replace('.',',')}" style="flex:1;min-width:70px"><span class="mut">–</span><input name="hi_${p}" inputmode="decimal" value="${String(hi).replace('.',',')}" style="flex:1;min-width:70px"></div>` }
+  h+=`<div class="small mut">La spunta decide quali parametri vedi in Home.</div></div>
+  <div class="card"><button class="btn" type="submit" style="width:100%">Salva impostazioni</button></div></form>
+  <div class="card"><h2>Backup</h2><div class="row"><button class="btn sec" id="exp">Esporta JSON</button><button class="btn sec" id="imp">Importa JSON</button><button class="btn sec" id="csv">Copia test in CSV</button></div>
+  <textarea id="expBox" class="hide" style="margin-top:8px;min-height:120px" readonly></textarea>
+  <div class="small mut" style="margin-top:6px">${S.tests.length} test · ${S.doses.length} variazioni dose · ${S.events.length} voci diario · archivio ${S.mode==='db'?'sul tuo account (privato)':'locale'}.</div></div>`;
+  return h;
+}
+
+/* ---------- Grafici ---------- */
+const AX={ticks:{color:'#8aa7b6',font:{size:11}},grid:{color:'#1f415355'}};
+function xTime(min,max){ return {type:'linear',min,max,ticks:{...AX.ticks,maxTicksLimit:6,callback:v=>fdate(v)},grid:AX.grid} }
+function rangeFrom(){ return grafRange? Date.now()-grafRange*DAY : null }
+function drawCharts(){
+  if(!window.Chart){ document.querySelectorAll('canvas').forEach(c=>c.outerHTML='<p class="mut small">Grafici non disponibili (libreria non caricata, controlla la connessione).</p>'); return }
+  Chart.defaults.color='#8aa7b6'; Chart.defaults.locale='it-IT';
+  const from=rangeFrom(), to=Date.now();
+  const xmin0 = from ?? Math.min(to-30*DAY, ...S.tests.map(t=>t.ts));
+  const xmin = xmin0;
+  for(const p of shownParams()){
+    const el=document.getElementById('cv_'+p); if(!el) continue;
+    const pts=testsWith(p).filter(t=>!from||t.ts>=from).map(t=>({x:t.ts,y:num(t.v[p])})); const [lo,hi]=tgt(p);
+    charts['v_'+p]=new Chart(el,{type:'line',data:{datasets:[
+      {label:P[p].n,data:pts,borderColor:'#2ec4d6',backgroundColor:'#2ec4d6',pointRadius:3.5,tension:.25,borderWidth:2},
+      {label:'min',data:[{x:xmin,y:lo},{x:to,y:lo}],borderColor:'#3fcf8e88',borderDash:[5,4],pointRadius:0,borderWidth:1.2},
+      {label:'max',data:[{x:xmin,y:hi},{x:to,y:hi}],borderColor:'#3fcf8e88',borderDash:[5,4],pointRadius:0,borderWidth:1.2,fill:'-1',backgroundColor:'#3fcf8e12'}
+    ]},options:{animation:false,plugins:{legend:{display:false},tooltip:{filter:i=>i.datasetIndex===0,callbacks:{title:i=>fdate(i[0].parsed.x,true)}}},scales:{x:xTime(xmin,to),y:AX}}});
+  }
+  // consumi
+  const ds=[]; for(const q of TRI){ const I=intervals(q).filter(x=>x.cons!=null&&(!from||x.t2>=from)); if(!I.length) continue;
+    const d=[]; for(const x of I){ d.push({x:x.t1,y:x.cons},{x:x.t2,y:x.cons}) }
+    ds.push({label:P[q].n,data:d,borderColor:TRI_COL[q],backgroundColor:TRI_COL[q],pointRadius:0,borderWidth:2,yAxisID:q==='kh'?'y2':'y'}) }
+  const c2=document.getElementById('cCons');
+  if(c2) charts.cons=new Chart(c2,{type:'line',data:{datasets:ds},options:{animation:false,plugins:{legend:{labels:{boxWidth:12}}},scales:{x:xTime(xmin,to),y:{...AX,title:{display:true,text:'ppm/g'}},y2:{...AX,ticks:{...AX.ticks,callback:v=>fmt(v,2)},grace:'10%',position:'right',grid:{display:false},title:{display:true,text:'dKH/g'}}}}});
+  // dosi
+  const R=regimens(); const dd=[];
+  const keys=[]; if(R.some(r=>r.kind!=='aio')) keys.push(...TRI); if(R.some(r=>r.kind==='aio')) keys.push('aio');
+  for(const q of keys){ const d=[]; let prev=null;
+    for(const r of R){ const y= q==='aio' ? (r.kind==='aio'?num(r.aio)||0:0) : (r.kind==='aio'?0:num(r[q])||0); if(prev!=null) d.push({x:r.ts,y:prev}); d.push({x:r.ts,y}); prev=y }
+    if(prev!=null) d.push({x:to,y:prev});
+    dd.push({label:q==='aio'?'All In One':P[q].n,data:d.filter(z=>!from||z.x>=from-1),borderColor:q==='aio'?'#2ec4d6':TRI_COL[q],pointRadius:0,borderWidth:2}) }
+  const c3=document.getElementById('cDose');
+  if(c3) charts.dose=new Chart(c3,{type:'line',data:{datasets:dd},options:{animation:false,plugins:{legend:{labels:{boxWidth:12}}},scales:{x:xTime(xmin,to),y:{...AX,beginAtZero:true}}}});
+}
+function drawSpark(){
+  const el=document.getElementById('spark'); if(!el) return; if(!window.Chart){ el.outerHTML='<p class="mut small">Grafico non disponibile offline.</p>'; return }
+  Chart.defaults.locale='it-IT'; const from=Date.now()-60*DAY, T=testsWith('kh').filter(t=>t.ts>=from);
+  if(!T.length){ el.parentElement.innerHTML='<h2>KH ultimi 60 giorni</h2><p class="mut small">Nessun test KH nel periodo.</p>'; return }
+  const [lo,hi]=tgt('kh');
+  charts.spark=new Chart(el,{type:'line',data:{datasets:[{data:T.map(t=>({x:t.ts,y:num(t.v.kh)})),borderColor:'#f08c3a',backgroundColor:'#f08c3a',pointRadius:3,tension:.25,borderWidth:2},
+    {data:[{x:from,y:lo},{x:Date.now(),y:lo}],borderColor:'#3fcf8e66',borderDash:[5,4],pointRadius:0,borderWidth:1},{data:[{x:from,y:hi},{x:Date.now(),y:hi}],borderColor:'#3fcf8e66',borderDash:[5,4],pointRadius:0,borderWidth:1}]},
+    options:{animation:false,plugins:{legend:{display:false}},scales:{x:xTime(from,Date.now()),y:AX}}});
+}
+
+/* ---------- Eventi UI ---------- */
+function go(v){ view=v; confirmKey=null; document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v)); render(); window.scrollTo(0,0) }
+document.getElementById('nav').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b) go(b.dataset.v) });
+
+function formVals(f){ const o={}; new FormData(f).forEach((v,k)=>o[k]=v); return o }
+function bind(){
+  const app=document.getElementById('app');
+  app.querySelectorAll('[data-go]').forEach(b=>b.onclick=e=>{e.preventDefault();go(b.dataset.go)});
+  app.querySelectorAll('[data-graf]').forEach(b=>b.onclick=()=>{const p=b.dataset.graf;go('graf');const el=document.getElementById('g_'+p);if(el)el.scrollIntoView({block:'start'})});
+  app.querySelectorAll('[data-gr]').forEach(b=>b.onclick=()=>{grafRange=+b.dataset.gr;render()});
+  app.querySelectorAll('[data-ask]').forEach(b=>b.onclick=()=>{confirmKey=b.dataset.ask;render();setTimeout(()=>{if(confirmKey===b.dataset.ask){confirmKey=null;render()}},4000)});
+  app.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{const [c,id]=b.dataset.del.split(':');confirmKey=null;await delItem(c,id);toast('Eliminato');render()});
+  app.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{editTest=clone(S.tests.find(t=>t.id===b.dataset.edit));render();window.scrollTo(0,0)});
+  app.querySelectorAll('[data-mode]').forEach(b=>b.onclick=async()=>{ if(S.settings.mode===b.dataset.mode) return; S.settings=Object.assign(clone(S.settings),{mode:b.dataset.mode}); await saveSettings(); toast(b.dataset.mode==='aio'?'Modalità All In One':'Modalità Balling 3 parti') });
+  app.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>{go('diario')});
+  const ce=document.getElementById('cancelEdit'); if(ce) ce.onclick=()=>{editTest=null;render()};
+
+  const fT=document.getElementById('fTest');
+  if(fT) fT.onsubmit=async e=>{ e.preventDefault(); const o=formVals(fT); const v={};
+    for(const p of Object.keys(P)){ const n=num(o[p]); if(n!=null) v[p]=n }
+    if(!Object.keys(v).length){ toast('Inserisci almeno un valore'); return }
+    const item={id:editTest?.id||uid(),ts:fromInput(o.ts),v,note:(o.note||'').trim()};
+    if(await saveItem('tests',item)){ editTest=null; toast('Test salvato'); render() } };
+
+  const fD=document.getElementById('fDose');
+  if(fD) fD.onsubmit=async e=>{ e.preventDefault(); const o=formVals(fD);
+    const item = isAIO()
+      ? {id:uid(),ts:fromInput(o.ts),kind:'aio',aio:num(o.aio)||0,note:(o.note||'').trim()}
+      : {id:uid(),ts:fromInput(o.ts),kind:'balling',ca:num(o.ca)||0,kh:num(o.kh)||0,mg:num(o.mg)||0,note:(o.note||'').trim()};
+    if(await saveItem('doses',item)){ toast('Dose salvata'); render() } };
+
+  const fE=document.getElementById('fEv');
+  if(fE){ const sel=document.getElementById('evType');
+    const sync=()=>{ document.getElementById('evWc').classList.toggle('hide',sel.value!=='wc'); document.getElementById('evDose').classList.toggle('hide',sel.value!=='dose') };
+    sel.onchange=sync; sync();
+    fE.onsubmit=async e=>{ e.preventDefault(); const o=formVals(fE);
+      const item={id:uid(),ts:fromInput(o.ts),type:o.type,note:(o.note||'').trim()};
+      if(o.type==='wc'){ item.liters=num(o.liters); if(!item.liters){toast('Indica i litri');return} }
+      if(o.type==='dose'){ const a=num(o.aio)||0; const sep=TRI.some(p=>num(o[p]));
+        if(a&&sep){ // AIO + singoli: due voci separate
+          const it2={id:uid(),ts:item.ts,type:'dose',kind:'balling',note:item.note}; for(const p of TRI) it2[p]=num(o[p])||0;
+          if(!await saveItem('events',it2)) return; }
+        if(a){ item.kind='aio'; item.aio=a } else { item.kind='balling'; for(const p of TRI) item[p]=num(o[p])||0 }
+        if(!a&&!sep){toast('Indica almeno una dose');return} }
+      if(['maint','live','note'].includes(o.type)&&!item.note){ toast('Aggiungi una descrizione'); return }
+      if(await saveItem('events',item)){ toast('Aggiunto'); render() } };
+  }
+
+  const fS=document.getElementById('fSet');
+  if(fS){
+    document.getElementById('calcRecipe').onclick=()=>{
+      const g=id=>num(document.getElementById(id).value)||0;
+      const ca=g('r_ca')*0.2726, kh=g('r_hco3')*11.90/1000+g('r_co3')*18.87/1000, mg=g('r_mgcl')*0.1196+g('r_mgso')*0.0986;
+      if(ca) fS.c_ca.value=fmt(ca,2); if(kh) fS.c_kh.value=fmt(kh,3); if(mg) fS.c_mg.value=fmt(mg,2);
+      toast('Valori calcolati: ricordati di salvare');
+    };
+    fS.onsubmit=async e=>{ e.preventDefault(); const o=formVals(fS); const s=clone(S.settings);
+      s.volume=num(o.volume)||s.volume;
+      s.conc={ca:num(o.c_ca)??'',kh:num(o.c_kh)??'',mg:num(o.c_mg)??''};
+      s.salt={ca:num(o.s_ca)??'',kh:num(o.s_kh)??'',mg:num(o.s_mg)??''};
+      s.aio={ca:num(o.a_ca)??'',kh:num(o.a_kh)??'',mg:num(o.a_mg)??''};
+      s.targets={}; s.showParams=[];
+      for(const p of Object.keys(P)){ const lo=num(o['lo_'+p]),hi=num(o['hi_'+p]); if(lo!=null&&hi!=null) s.targets[p]=[Math.min(lo,hi),Math.max(lo,hi)]; if(o['show_'+p]) s.showParams.push(p) }
+      S.settings=s; await saveSettings(); toast('Impostazioni salvate') };
+    document.getElementById('exp').onclick=async()=>{
+      const data=JSON.stringify({app:'reeflog',v:1,exported:new Date().toISOString(),tests:S.tests,doses:S.doses,events:S.events,settings:S.settings},null,1);
+      const fn=`reeflog-backup-${new Date().toISOString().slice(0,10)}.json`;
+      try{ const dl=window.claude?.use? await window.claude.use('downloads'):null; if(dl){ await dl.save({filename:fn,data}); toast('Backup pronto'); return } }catch(err){}
+      try{ const f=new File([data],fn,{type:'application/json'});
+        if(navigator.canShare&&navigator.canShare({files:[f]})){ await navigator.share({files:[f],title:'Backup Reef Log'}); localStorage.setItem('reeflog.lastBackup',Date.now()); toast('Backup condiviso'); render(); return } }catch(err){ if(err&&err.name==='AbortError') return }
+      try{ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([data],{type:'application/json'})); a.download=fn; document.body.appendChild(a); a.click(); a.remove(); localStorage.setItem('reeflog.lastBackup',Date.now()); toast('Backup scaricato'); render(); return }catch(err){}
+      const box=document.getElementById('expBox'); box.value=data; box.classList.remove('hide'); box.select();
+      try{ await navigator.clipboard.writeText(data); toast('Backup copiato negli appunti') }catch(err){ toast('Copia il testo qui sotto') }
+    };
+    document.getElementById('csv').onclick=async()=>{
+      const ks=Object.keys(P); const rows=[['data',...ks,'note'].join(';')];
+      for(const t of [...S.tests].sort(byTs)) rows.push([new Date(t.ts).toLocaleString('it-IT'),...ks.map(k=>t.v[k]!=null?String(t.v[k]).replace('.',','):''),'"'+(t.note||'').replace(/"/g,'""')+'"'].join(';'));
+      const box=document.getElementById('expBox'); box.value=rows.join('\n'); box.classList.remove('hide');
+      try{ await navigator.clipboard.writeText(box.value); toast('CSV copiato') }catch(err){ box.select(); toast('Copia il testo qui sotto') }
+    };
+    document.getElementById('imp').onclick=()=>document.getElementById('fileIn').click();
+  }
+}
+document.getElementById('fileIn').onchange=async e=>{
+  const f=e.target.files[0]; e.target.value=''; if(!f) return;
+  let j; try{ j=JSON.parse(await f.text()) }catch(err){ toast('File non valido'); return }
+  if(!j||j.app!=='reeflog'){ toast('Non è un backup Reef Log'); return }
+  toast('Importazione in corso…');
+  let n=0;
+  for(const c of ['tests','doses','events']) for(const it of (j[c]||[])){ if(it&&it.id&&isFinite(it.ts)){ if(S.mode==='db'){ try{ await base.collection(c).doc(String(it.id)).set(it); n++ }catch(err){ handleErr(err); return } } else { const a=S[c]; const i=a.findIndex(x=>x.id===it.id); if(i>=0)a[i]=it; else a.push(it); n++ } } }
+  if(j.settings){ S.settings=Object.assign(clone(DEF_SETTINGS),j.settings); await saveSettings() }
+  if(S.mode==='local') lsSave();
+  toast(`Importati ${n} elementi`); render();
+};
+
+initStore();
+if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
+if(navigator.storage&&navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+</script>
+</body>
+</html>
