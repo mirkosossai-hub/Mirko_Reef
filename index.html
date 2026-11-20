@@ -21,6 +21,23 @@ nav{position:fixed;bottom:0;left:0;right:0;z-index:6;display:flex;background:#0b
 nav button{flex:1;background:none;border:0;color:var(--mut);padding:9px 0 8px;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:3px}
 nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8}
 nav button.on{color:var(--acc)}
+nav button.plus span{display:flex;align-items:center;justify-content:center;width:50px;height:50px;border-radius:50%;background:var(--acc);margin-top:-22px;box-shadow:0 4px 14px #0008;border:4px solid #0b1b26}
+nav button.plus svg{stroke:#04222a;stroke-width:2.6;width:24px;height:24px}
+#sheet{position:fixed;inset:0;z-index:15;background:#0009;display:flex;align-items:flex-end}
+#sheet.hide{display:none}
+#sheet .pane{background:var(--card);border-top:1px solid var(--line);border-radius:18px 18px 0 0;width:100%;max-width:720px;margin:0 auto;padding:14px 14px calc(18px + env(safe-area-inset-bottom))}
+#sheet .acts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+#sheet .acts button{background:var(--card2);border:1px solid var(--line);border-radius:14px;color:var(--tx);padding:12px 4px;font:inherit;font-size:12px;display:flex;flex-direction:column;align-items:center;gap:6px}
+#sheet .acts button i{font-style:normal;font-size:24px}
+.seg{display:flex;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:3px;margin:10px 0}
+.seg button{flex:1;background:none;border:0;color:var(--mut);padding:8px 4px;border-radius:9px;font:inherit;font-size:14px}
+.seg button.on{background:var(--acc);color:#04222a;font-weight:700}
+.mitem{display:flex;align-items:center;gap:12px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;margin:8px 0;cursor:pointer}
+.mitem i{font-style:normal;font-size:22px;width:40px;height:40px;border-radius:11px;background:var(--card2);display:flex;align-items:center;justify-content:center;flex:none}
+.mitem .t{flex:1}.mitem .t b{display:block}.mitem .t span{font-size:12px;color:var(--mut)}
+.back{display:flex;align-items:center;gap:8px;margin:6px 0 2px}
+.back button{background:none;border:0;color:var(--acc);font:inherit;font-size:15px;padding:6px 0}
+.back h1{font-size:18px;margin:0 0 0 auto;font-weight:700}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:10px 0}
 .card h2{font-size:14px;margin:0 0 10px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.6px;display:flex;align-items:center;gap:8px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px}
@@ -89,12 +106,12 @@ hr{border:0;border-top:1px solid var(--line);margin:12px 0}
 <main id="app"></main>
 <nav id="nav">
   <button data-v="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9H3z"/></svg>Home</button>
-  <button data-v="test"><svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v6L5 19a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2l-5-10V3"/></svg>Test</button>
-  <button data-v="dosi"><svg viewBox="0 0 24 24"><path d="M12 3c3 4 6 7 6 11a6 6 0 0 1-12 0c0-4 3-7 6-11z"/></svg>Balling</button>
-  <button data-v="graf"><svg viewBox="0 0 24 24"><path d="M4 19h16M6 16l4-5 4 3 5-7"/></svg>Grafici</button>
-  <button data-v="diario"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg>Manut.</button>
-  <button data-v="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Impost.</button>
+  <button data-v="param"><svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v6L5 19a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2l-5-10V3"/></svg>Parametri</button>
+  <button data-v="plus" class="plus" aria-label="Aggiungi"><span><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span></button>
+  <button data-v="vasca"><svg viewBox="0 0 24 24"><path d="M3 12c3-4 7-5 11-2l4-3v10l-4-3c-4 3-8 2-11-2z"/><circle cx="8" cy="11" r=".8"/></svg>Vasca</button>
+  <button data-v="menu"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Menu</button>
 </nav>
+<div id="sheet" class="hide"></div>
 <div class="toast" id="toast"></div>
 <input type="file" id="fileIn" accept="application/json,.json" class="hide">
 <input type="file" id="photoIn" accept="image/*" multiple class="hide">
@@ -591,6 +608,12 @@ window.addEventListener('online',()=>scheduleSync(300));
 window.addEventListener('offline',updHdr);
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') scheduleSync(300) });
 setInterval(()=>{ if(document.visibilityState==='visible') sync() },60000);
+function vSyncPage(){ let h=vSync()+`  <div class="card"><h2>Backup</h2><div class="row"><button class="btn sec" id="exp">Esporta JSON</button><button class="btn sec" id="imp">Importa JSON</button><button class="btn sec" id="csv">Copia test in CSV</button></div>
+  ${allPhotoMetas().length?`<label class="small" style="display:block;margin-top:8px"><input type="checkbox" id="bkPhotos" checked style="width:auto;margin-right:6px">Includi le ${allPhotoMetas().length} foto nel backup (file più grande)</label>`:''}
+  <textarea id="expBox" class="hide" style="margin-top:8px;min-height:120px" readonly></textarea>
+  <div class="small mut" style="margin-top:6px">${S.tests.length} test · ${S.doses.length} variazioni dose · ${S.events.length} voci diario · archivio ${S.mode==='db'?'sul tuo account (privato)':'locale'}.</div></div>`;
+  return h;
+}
 function vSync(){
   let h=`<div class="card"><h2>Sincronizzazione</h2>`;
   if(!sb) return h+`<p class="small mut">Servizio non raggiungibile (sei offline?). I dati restano salvati qui e si sincronizzeranno più tardi.</p></div>`;
@@ -628,17 +651,17 @@ function bindSync(){
 function render(){
   const app=document.getElementById('app');
   Object.values(charts).forEach(c=>c.destroy()); for(const k in charts) delete charts[k];
-  const sub=document.getElementById('hdrSub');
-  sub.innerHTML = `${vol()} L netti<br>${S.mode==='db'?'☁︎ sincronizzato':syncLabel()}`;
+  const hdr=document.getElementById('hdrSub');
+  hdr.innerHTML = `${vol()} L netti<br>${S.mode==='db'?'☁︎ sincronizzato':syncLabel()}`;
   let h='';
-  if(S.mode==='local' && S.ready && !sbUser && backupDue()) h+=`<div class="banner">I dati sono salvati su questo dispositivo. ${lastBackup()?`Ultimo backup ${Math.floor((Date.now()-lastBackup())/DAY)} giorni fa`:'Non hai ancora fatto un backup'}: <a href="#" data-go="set" style="color:#ffd98a">esporta ora</a>.<button id="bkClose" style="float:right;background:none;border:0;color:#ffd98a;font-size:18px;line-height:1;padding:0 0 0 10px">✕</button></div>`;
+  if(S.mode==='local' && S.ready && !sbUser && backupDue()) h+=`<div class="banner">I dati sono salvati su questo dispositivo. ${lastBackup()?`Ultimo backup ${Math.floor((Date.now()-lastBackup())/DAY)} giorni fa`:'Non hai ancora fatto un backup'}: <a href="#" data-go="sync" style="color:#ffd98a">esporta ora</a>.<button id="bkClose" style="float:right;background:none;border:0;color:#ffd98a;font-size:18px;line-height:1;padding:0 0 0 10px">✕</button></div>`;
   if(S.mode==='db' && S.stale && !S.tests.length && !S.doses.length) h+=`<div class="banner">Caricamento dati…</div>`;
-  h += ({home:vHome,test:vTest,dosi:vDosi,graf:vGraf,diario:vManut,set:vSet,foto:vFoto,animali:vAnimali})[view]();
+  h += (VIEWS[view]||vHome)();
   app.innerHTML=h;
   bind();
-  if(view==='graf') drawCharts();
+  if(view==='param'&&sub==='grafici') drawCharts();
   if(view==='home'){ drawSpark(); drawStart() }
-  if(view==='diario') drawTds();
+  if(view==='osmosi') drawTds();
 }
 
 function vHome(){
@@ -661,11 +684,11 @@ function vHome(){
     h+=`<div class="card"><h2>Da fare</h2><div class="list">`;
     for(const t of soon) h+=`<div class="it"><div class="body"><b>${esc(t.name)}</b>${t.bacter?`<div class="small mut">${bacterTxt()}</div>`:''}</div><div>${dueBadge(t)}</div></div>`;
     if(tdsBad) h+=`<div class="it"><div class="body"><b style="color:var(--bad)">Osmosi: TDS ${fmt(num(ltds.tds),0)} ppm</b><div class="small mut">Raggiunta la soglia: cambia le resine</div></div></div>`;
-    h+=`</div><button class="btn sm sec" data-go="diario" style="margin-top:8px">Apri manutenzione</button></div>`;
+    h+=`</div><button class="btn sm sec" data-go="manut" style="margin-top:8px">Apri manutenzione</button></div>`;
   }
   h+=`<div class="card"><h2>Ultimi valori ${lt?`<span class="tag">ultimo test ${Math.floor((Date.now()-lt)/DAY)===0?'oggi':Math.floor((Date.now()-lt)/DAY)+' gg fa'}</span>`:''}</h2>`;
   const ps=(S.settings.showParams||Object.keys(P)).filter(p=>P[p]);
-  if(!S.tests.length) h+=`<p class="mut">Nessun test registrato. <button class="btn sm" data-go="test">Inserisci il primo test</button></p>`;
+  if(!S.tests.length) h+=`<p class="mut">Nessun test registrato. <button class="btn sm" data-go="param-nuovo">Inserisci il primo test</button></p>`;
   else{
     h+=`<div class="grid">`;
     for(const p of ps){ const l=lastVal(p); if(!l) continue;
@@ -707,21 +730,8 @@ function vHome(){
   for(const p of TRI){ const l=lastVal(p), eff=effPerMl(p); if(!l||!eff) continue; const [lo,hi]=tgt(p); const mid=(lo+hi)/2;
     if(l.v<lo){ const ml=(mid-l.v)*vol()/eff; corr+=`<div>• ${P[p].n}: ${fmt(l.v,P[p].d)} sotto target → circa <b>${fmt(ml,0)} ml${isAIO()?' di AIO':''}</b> una tantum per arrivare a ${fmt(mid,P[p].d)}${p==='kh'&&(mid-l.v)>1?` <span class="mut">(dividi in ${Math.ceil(mid-l.v)} giorni: max ~1 dKH/giorno)</span>`:''}</div>` } }
   if(corr) h+=`<hr><div class="small"><div class="mut" style="margin-bottom:4px">Correzioni suggerite</div>${corr}</div>`;
-  if(!effPerMl('mg')||!effPerMl('ca')) h+=`<hr><div class="small mut">Imposta la concentrazione delle soluzioni in <a href="#" data-go="set" style="color:var(--acc)">Impostazioni</a> per calcolare consumi e dosi.</div>`;
+  if(!effPerMl('mg')||!effPerMl('ca')) h+=`<hr><div class="small mut">Imposta la concentrazione delle soluzioni in <a href="#" data-go="impostazioni" style="color:var(--acc)">Impostazioni</a> per calcolare consumi e dosi.</div>`;
   h+=`<div class="small mut" style="margin-top:8px">Consumo = media pesata degli ultimi 30 gg tra test consecutivi, al netto di dosi e cambi d'acqua.</div></div>`;
-  h+=`<div class="card"><h2>KH ultimi 60 giorni</h2><canvas id="spark" height="120"></canvas></div>`;
-  // promemoria
-  const lastWc=S.events.filter(e=>e.type==='wc').sort(byTs).pop();
-  { const al=lvAlive(); if(S.livestock.length) h+=`<div class="card row" data-go="animali" style="justify-content:space-between;cursor:pointer"><span><b>🐠 Animali e coralli</b><br><span class="small mut">${al.reduce((a,x)=>a+(num(x.qty)||1),0)} in vasca · valore ${eur(al.reduce((a,x)=>a+lvCost(x),0))}</span></span><span class="mut">›</span></div>`;
-    else h+=`<div class="card row" style="justify-content:space-between"><span class="small">Registra pesci, coralli e invertebrati</span><button class="btn sm sec" data-go="animali">🐠 Animali</button></div>`; }
-  { const lp=S.photos[0];
-    h+=`<div class="card"><h2>Foto progressi <span class="tag">${S.photos.length}</span></h2>${lp?`<div class="row" style="flex-wrap:nowrap;align-items:center"><img src="${lp.thumb}" data-go="foto" style="width:96px;height:72px;object-fit:cover;border-radius:9px"><div class="small" style="flex:1">Ultima foto: <b>${fdate(lp.ts,true)}</b>${dayLabel(lp.ts)?` (${dayLabel(lp.ts)})`:''}<br><span class="mut">${Math.floor((Date.now()-lp.ts)/DAY)} giorni fa</span></div></div>`:'<p class="small mut">Nessuna foto ancora.</p>'}
-      <div class="row" style="margin-top:8px"><button class="btn sm" id="homeAddPhoto">📷 Aggiungi foto</button><button class="btn sm sec" data-go="foto">Galleria</button></div></div>`; }
-  h+=`<div class="card"><h2>Promemoria</h2><div class="small">`;
-  h+= lastWc?`Ultimo cambio d'acqua: <b>${fdate(lastWc.ts)}</b> (${Math.floor((Date.now()-lastWc.ts)/DAY)} gg fa, ${fmt(num(lastWc.liters),1)} L)`:'Nessun cambio d\'acqua registrato.';
-  const lt2=S.tests.length? Math.floor((Date.now()-Math.max(...S.tests.map(t=>t.ts)))/DAY):null;
-  if(lt2!=null&&lt2>=7) h+=`<br><span style="color:var(--warn)">Sono passati ${lt2} giorni dall'ultimo test.</span>`;
-  h+=`</div><div class="row" style="margin-top:10px"><button class="btn sm" data-go="test">+ Test</button><button class="btn sm sec" data-go="diario">Manutenzione</button><button class="btn sm sec" data-go="dosi">Modifica dosi</button></div></div>`;
   return h;
 }
 
@@ -736,7 +746,10 @@ function vTest(){
   h+=`</div><div class="f" style="margin-top:8px"><label>Note (kit usato, osservazioni…)</label><textarea name="note">${esc(t.note)}</textarea></div>
     <div class="row" style="margin-top:10px"><button class="btn" type="submit">Salva test</button>${editTest?'<button class="btn sec" type="button" id="cancelEdit">Annulla</button>':''}</div>
     <div class="small mut" style="margin-top:6px">Compila solo i parametri misurati. Il segnaposto mostra l'ultimo valore.</div></form></div>`;
-  h+=`<div class="card"><h2>Storico test (${S.tests.length})</h2><div class="list">`;
+  return h;
+}
+function vTestHist(){
+  let h=`<div class="card"><h2>Storico test (${S.tests.length})</h2><div class="list">`;
   const T=[...S.tests].sort((a,b)=>b.ts-a.ts);
   if(!T.length) h+=`<p class="mut">Nessun test.</p>`;
   for(const x of T){
@@ -796,9 +809,7 @@ function vGraf(){
 }
 
 function vManut(){
-  let h=`<div class="card row" style="justify-content:space-between"><button class="btn sm sec" data-go="foto">📷 Foto (${S.photos.length})</button><button class="btn sm sec" data-go="animali">🐠 Animali e coralli (${lvAlive().length})</button></div>`;
-  // Scadenze
-  h+=`<div class="card"><h2>Scadenze</h2>`;
+  let h=`<div class="card"><h2>Scadenze</h2>`;
   if(!S.tasks.length) h+=`<p class="small mut">Nessuna scadenza impostata.</p><button class="btn sm" id="seedTasks">Crea le scadenze consigliate</button><div class="small mut" style="margin-top:6px">Cambio 10% il 15 e il 30 con Bacter Mix e Nitrix, test settimanale, schiumatoio, TDS osmosi. Potrai modificarle.</div>`;
   const T=[...S.tasks].sort((a,b)=>nextDue(a)-nextDue(b));
   h+=`<div class="list">`;
@@ -825,7 +836,10 @@ function vManut(){
     <div class="row" style="margin-top:8px"><button class="btn sm" type="submit">Salva</button>${editTask?'<button class="btn sm sec" type="button" id="tkCancel">Annulla</button>':''}</div></form></details>`;
   if(S.tasks.length) h+=`<hr><button class="btn sm sec" id="icsBtn">📅 Aggiungi al calendario del telefono</button><div class="small mut" style="margin-top:4px">Crea un file .ics con le ricorrenze e un promemoria alle 9:00. Le scadenze "ogni N giorni" nel calendario restano fisse anche se fai la cosa in ritardo.</div>`;
   h+=`</div>`;
-  // Osmosi
+  return h;
+}
+function vOsmo(){
+  let h='';
   const lt=lastEv('tds'), lr=lastEv('resin'), lm=lastEv('membr'), lp=lastEv('prefilt'); const [cls,txt]=tdsState(lt?num(lt.tds):null);
   const sinceR = lr? S.events.filter(e=>e.type==='tds'&&e.ts>=lr.ts).length : null;
   h+=`<div class="card"><h2>Impianto osmosi</h2><div class="grid">
@@ -837,7 +851,7 @@ function vManut(){
     <div class="row" style="margin-top:8px"><button class="btn sm sec" data-ro="resin">Resine cambiate</button><button class="btn sm sec" data-ro="membr">Membrana cambiata</button><button class="btn sm sec" data-ro="prefilt">Prefiltri cambiati</button></div>
     <canvas id="cTds" height="130" style="margin-top:10px"></canvas>
     <div class="small mut" style="margin-top:4px">Soglia cambio resine: ${fmt(num(S.settings.tdsMax)||3,0)} ppm (modificabile in Impostazioni). Il grafico parte dall'ultimo cambio resine.</div></div>`;
-  return h+vDiario();
+  return h;
 }
 function vDiario(){
   let h=`<div class="card"><h2>Nuova voce</h2><form id="fEv">
@@ -864,7 +878,7 @@ function vDiario(){
 
 function vSet(){
   const s=S.settings;
-  let h=vSync()+`<form id="fSet"><div class="card"><h2>Vasca</h2>
+  let h=`<form id="fSet"><div class="card"><h2>Vasca</h2>
     <div class="row"><div class="f"><label>Volume netto d'acqua (L)</label><input name="volume" inputmode="decimal" value="${esc(String(s.volume).replace('.',','))}"></div></div>
     <div class="small mut" style="margin-top:4px">Volume reale (vasca + sump, tolte rocce e sabbia). Influisce su tutti i calcoli.</div></div>
   <div class="card"><h2>Avvio e manutenzione</h2>
@@ -902,10 +916,7 @@ function vSet(){
       <input name="lo_${p}" inputmode="decimal" value="${String(lo).replace('.',',')}" style="flex:1;min-width:70px"><span class="mut">–</span><input name="hi_${p}" inputmode="decimal" value="${String(hi).replace('.',',')}" style="flex:1;min-width:70px"></div>` }
   h+=`<div class="small mut">La spunta decide quali parametri vedi in Home.</div></div>
   <div class="card"><button class="btn" type="submit" style="width:100%">Salva impostazioni</button></div></form>
-  <div class="card"><h2>Backup</h2><div class="row"><button class="btn sec" id="exp">Esporta JSON</button><button class="btn sec" id="imp">Importa JSON</button><button class="btn sec" id="csv">Copia test in CSV</button></div>
-  ${allPhotoMetas().length?`<label class="small" style="display:block;margin-top:8px"><input type="checkbox" id="bkPhotos" checked style="width:auto;margin-right:6px">Includi le ${allPhotoMetas().length} foto nel backup (file più grande)</label>`:''}
-  <textarea id="expBox" class="hide" style="margin-top:8px;min-height:120px" readonly></textarea>
-  <div class="small mut" style="margin-top:6px">${S.tests.length} test · ${S.doses.length} variazioni dose · ${S.events.length} voci diario · archivio ${S.mode==='db'?'sul tuo account (privato)':'locale'}.</div></div>`;
+`;
   return h;
 }
 
@@ -975,15 +986,89 @@ function drawTds(){
     options:{animation:false,plugins:{legend:{display:false}},scales:{x:xTime(x0,x1),y:{...AX,beginAtZero:true,suggestedMax:mx+1,ticks:{...AX.ticks,stepSize:1}}}}});
 }
 
+
+/* ---------- Navigazione ---------- */
+let sub=''; const lastSub={};
+const SUBS={param:[['nuovo','Nuovo test'],['grafici','Grafici'],['storico','Storico']],vasca:[['animali','Animali e coralli'],['foto','Foto']]};
+const ALIAS={test:'param-nuovo',graf:'param-grafici',foto:'vasca-foto',animali:'vasca-animali',set:'impostazioni'};
+const MENU_VIEWS={dosi:'Dosaggio',manut:'Manutenzione',osmosi:'Osmosi',diario:'Diario',impostazioni:'Impostazioni',sync:'Sincronizzazione e backup'};
+function segBar(v){ return `<div class="seg">${SUBS[v].map(([k,l])=>`<button class="${k===sub?'on':''}" data-sub="${k}">${l}</button>`).join('')}</div>` }
+function backBar(){ return `<div class="back"><button data-go="menu">‹ Menu</button><h1>${MENU_VIEWS[view]}</h1></div>` }
+const VIEWS={
+  home:vHome,
+  param:()=>segBar('param')+(sub==='grafici'?vGraf():sub==='storico'?vTestHist():vTest()),
+  vasca:()=>segBar('vasca')+(sub==='foto'?vFoto():vAnimali()),
+  menu:vMenu,
+  dosi:()=>backBar()+vDosi(),
+  manut:()=>backBar()+vManut(),
+  osmosi:()=>backBar()+vOsmo(),
+  diario:()=>backBar()+vDiario(),
+  impostazioni:()=>backBar()+vSet(),
+  sync:()=>backBar()+vSyncPage(),
+};
+function parseHash(){
+  let hsh=(location.hash||'').slice(1); if(ALIAS[hsh]) hsh=ALIAS[hsh];
+  let [v,sb]=hsh.split('-'); if(!VIEWS[v]) v='home';
+  if(SUBS[v]){ if(!SUBS[v].some(x=>x[0]===sb)) sb=SUBS[v][0][0] } else sb='';
+  return [v,sb];
+}
+function applyRoute(){
+  const [v,sb]=parseHash(); const changed=(v!==view||sb!==sub);
+  view=v; sub=sb; confirmKey=null; if(sb) lastSub[v]=sb;
+  if(changed){ doneOpen=null; editTask=null; photoSel=null; if(v!=='vasca'){ lvEdit=null; lvPendingPhoto=null } }
+  const tab= v==='home'?'home': v==='param'?'param': v==='vasca'?'vasca':'menu';
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===tab));
+  closeSheet(); render(); if(changed) window.scrollTo(0,0);
+}
+function go(target){
+  if(target==='plus'){ openSheet(); return }
+  if(ALIAS[target]) target=ALIAS[target];
+  if(('#'+target)===location.hash || (target==='home'&&!location.hash)) applyRoute();
+  else location.hash=target;
+}
+window.addEventListener('hashchange',applyRoute);
+function vMenu(){
+  const over=S.tasks.filter(t=>dueDiff(t)<0).length, today=S.tasks.filter(t=>dueDiff(t)===0).length;
+  const lt=lastEv('tds'); const curAio=rateAt('kh',Date.now());
+  const items=[
+    ['dosi','💧','Dosaggio',isAIO()?`All In One · ${fmt(curAio,1)} ml/g`:'Balling 3 parti · consumi e dosi'],
+    ['manut','🔧','Manutenzione',S.tasks.length?(over?`${over} scadut${over>1?'e':'a'}`:today?`${today} da fare oggi`:'tutto in regola'):'scadenze e calendario'],
+    ['osmosi','🚰','Osmosi',lt?`ultimo TDS ${fmt(num(lt.tds),0)} ppm · ${tdsState(num(lt.tds))[1]}`:'TDS, resine, membrana'],
+    ['diario','📓','Diario',`${S.events.length} ${S.events.length===1?'voce':'voci'} · cambi, dosi, note`],
+    ['impostazioni','⚙️','Impostazioni','vasca, avvio, prodotti, range'],
+    ['sync','☁️','Sincronizzazione e backup',sbUser?syncLabel():'non collegato · backup JSON'],
+  ];
+  return `<div style="margin-top:6px">`+items.map(([k,i,t,d])=>`<div class="mitem" data-go="${k}"><i>${i}</i><div class="t"><b>${t}</b><span>${d}</span></div><span class="mut">›</span></div>`).join('')+`</div>`;
+}
+let evPreset=null;
+function openSheet(){
+  const el=document.getElementById('sheet');
+  const A=[['test','🧪','Test'],['dose','💧','Dose'],['wc','🔄','Cambio acqua'],['tds','🚰','TDS'],['photo','📷','Foto'],['lv','🐠','Animale'],['maint','🔧','Manutenz.'],['note','📝','Nota']];
+  el.innerHTML=`<div class="pane"><div class="row" style="justify-content:space-between;margin-bottom:12px"><b>Aggiungi</b><button class="btn sm sec" id="shX">✕</button></div><div class="acts">${A.map(([k,i,l])=>`<button data-qa="${k}"><i>${i}</i>${l}</button>`).join('')}</div></div>`;
+  el.classList.remove('hide');
+  el.onclick=e=>{ if(e.target===el) closeSheet() };
+  document.getElementById('shX').onclick=closeSheet;
+  el.querySelectorAll('[data-qa]').forEach(b=>b.onclick=()=>{ const k=b.dataset.qa; closeSheet();
+    if(k==='test') go('param-nuovo');
+    else if(k==='dose') go('dosi');
+    else if(k==='wc'){ const t=S.tasks.find(x=>x.wc); if(t){ go('manut'); setTimeout(()=>{ doneOpen=t.id; render(); document.getElementById('fDone')?.scrollIntoView({block:'center'}) },60) } else { evPreset='wc'; go('diario') } }
+    else if(k==='tds'){ go('osmosi'); setTimeout(()=>document.querySelector('#fTds input')?.focus(),80) }
+    else if(k==='photo') document.getElementById('photoIn').click();
+    else if(k==='lv'){ go('vasca-animali'); setTimeout(()=>{ lvEdit={}; lvPendingPhoto=null; render() },60) }
+    else if(k==='maint'){ go('manut') }
+    else { evPreset=k; go('diario') } });
+}
+function closeSheet(){ const el=document.getElementById('sheet'); if(el) el.classList.add('hide') }
+
 /* ---------- Eventi UI ---------- */
-function go(v){ view=v; confirmKey=null; doneOpen=null; editTask=null; photoSel=null; lvEdit=null; lvPendingPhoto=null; document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v)); render(); window.scrollTo(0,0) }
-document.getElementById('nav').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b) go(b.dataset.v) });
+document.getElementById('nav').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return; const v=b.dataset.v; go(v==='param'||v==='vasca'?v+'-'+(lastSub[v]||SUBS[v][0][0]):v) });
 
 function formVals(f){ const o={}; new FormData(f).forEach((v,k)=>o[k]=v); return o }
 function bind(){
   const app=document.getElementById('app');
   app.querySelectorAll('[data-go]').forEach(b=>b.onclick=e=>{e.preventDefault();go(b.dataset.go)});
-  app.querySelectorAll('[data-graf]').forEach(b=>b.onclick=()=>{const p=b.dataset.graf;go('graf');const el=document.getElementById('g_'+p);if(el)el.scrollIntoView({block:'start'})});
+  app.querySelectorAll('[data-graf]').forEach(b=>b.onclick=()=>{const p=b.dataset.graf;go('param-grafici');setTimeout(()=>{const el=document.getElementById('g_'+p);if(el)el.scrollIntoView({block:'start'})},80)});
+  app.querySelectorAll('[data-sub]').forEach(b=>b.onclick=()=>go(view+'-'+b.dataset.sub));
   app.querySelectorAll('[data-gr]').forEach(b=>b.onclick=()=>{grafRange=+b.dataset.gr;render()});
   app.querySelectorAll('[data-ask]').forEach(b=>b.onclick=()=>{confirmKey=b.dataset.ask;render();setTimeout(()=>{if(confirmKey===b.dataset.ask){confirmKey=null;render()}},4000)});
   app.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{const [c,id]=b.dataset.del.split(':');confirmKey=null;await delItem(c,id);toast('Eliminato');render()});
@@ -1043,7 +1128,7 @@ function bind(){
   app.querySelectorAll('[data-ro]').forEach(b=>b.onclick=async()=>{ if(b.dataset.c!=='1'){ b.dataset.c='1'; b.textContent='Confermi?'; return }
     if(await saveItem('events',{id:uid(),ts:Date.now(),type:b.dataset.ro,note:''})){ toast(RO_TYPES[b.dataset.ro]+' ✓'); render() } });
   const fE=document.getElementById('fEv');
-  if(fE){ const sel=document.getElementById('evType');
+  if(fE){ const sel=document.getElementById('evType'); if(evPreset){ sel.value=evPreset; evPreset=null; setTimeout(()=>fE.scrollIntoView({block:'start'}),30) }
     const sync=()=>{ document.getElementById('evWc').classList.toggle('hide',sel.value!=='wc'); document.getElementById('evDose').classList.toggle('hide',sel.value!=='dose'); document.getElementById('evTds').classList.toggle('hide',sel.value!=='tds') };
     sel.onchange=sync; sync();
     fE.onsubmit=async e=>{ e.preventDefault(); const o=formVals(fE);
@@ -1077,6 +1162,8 @@ function bind(){
       s.targets={}; s.showParams=[];
       for(const p of Object.keys(P)){ const lo=num(o['lo_'+p]),hi=num(o['hi_'+p]); if(lo!=null&&hi!=null) s.targets[p]=[Math.min(lo,hi),Math.max(lo,hi)]; if(o['show_'+p]) s.showParams.push(p) }
       S.settings=s; await saveSettings(); toast('Impostazioni salvate') };
+  }
+  if(document.getElementById('exp')){
     document.getElementById('exp').onclick=async()=>{
       const withPh=document.getElementById('bkPhotos')?.checked; if(withPh&&S.photos.length) toast('Preparo le foto…');
       const photos=withPh? await photosForBackup() : undefined;
@@ -1121,7 +1208,7 @@ function lvFormSnapshot(){ const f=document.getElementById('fLv'); return f?form
 function lvFormRestore(o){ const f=document.getElementById('fLv'); if(!f||!o) return; for(const [k,v] of Object.entries(o)){ const el=f.elements[k]; if(el) el.value=v } const sel=document.getElementById('lvSt'); if(sel) document.getElementById('lvEndF').classList.toggle('hide',sel.value==='alive') }
 document.getElementById('photoIn').onchange=e=>{ const fs=[...e.target.files]; e.target.value=''; if(fs.length) addPhotos(fs) };
 window.addEventListener('popstate',()=>{ if(!document.getElementById('ov').classList.contains('hide')){ closeOv(); render() } });
-initStore(); loadPhotos().then(()=>{ if(S.photos.length) render(); initSync() });
+applyRoute(); initStore(); loadPhotos().then(()=>{ if(S.photos.length) render(); initSync() });
 if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
 if(navigator.storage&&navigator.storage.persist) navigator.storage.persist().catch(()=>{});
 </script>
