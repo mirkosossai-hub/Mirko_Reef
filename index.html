@@ -147,7 +147,7 @@ const DEF_SETTINGS = {
   salt: {ca:'', kh:'', mg:''},
   targets: {},
   showParams: ['kh','ca','mg','no3','po4','den','ph','temp'],
-  startDate: '2026-11-12', startDays: 28, bacterPer250: 5, tdsMax: 3,
+  startDate: '', startDays: 28, bacterPer250: 5, bactName: 'Bacter Mix + Bacter Nitrix', tdsMax: 3,
 };
 
 /* ---------- Stato ---------- */
@@ -310,9 +310,12 @@ function dueBadge(t){ const d=dueDiff(t);
   return `<span class="tag">${fdate(nextDue(t))} · tra ${d} gg</span>` }
 function cadence(t){ return t.kind==='interval'? `ogni ${num(t.every)||7} giorni` : `il ${(t.days||[]).join(' e il ')} di ogni mese` }
 function bacterMl(){ return (num(S.settings.bacterPer250)||5)*vol()/250 }
-function bacterTxt(){ const m=bacterMl(); return `Bacter Mix ${fmt(m,1)} ml + Bacter Nitrix ${fmt(m,1)} ml` }
+function startMode(){ return S.settings.startMode || (S.settings.startDate?'fixed':'none') }
+function bacterOn(){ return S.settings.bacterOn ?? (startMode()==='fixed') }
+function bactNames(){ return String(S.settings.bactName||'Bacter Mix + Bacter Nitrix').split('+').map(x=>x.trim()).filter(Boolean) }
+function bacterTxt(){ const m=bacterMl(); return bactNames().map(n=>`${n} ${fmt(m,1)} ml`).join(' + ') }
 const DEFAULT_TASKS=[
-  {name:"Cambio acqua 10% + batteri",kind:'monthly',days:[15,30],wc:true,bacter:true},
+  {name:"Cambio acqua 10%",kind:'interval',every:7,wc:true},
   {name:"Test parametri",kind:'interval',every:7,auto:'test'},
   {name:"Pulizia bicchiere schiumatoio",kind:'interval',every:7},
   {name:"Lettura TDS osmosi",kind:'interval',every:14,auto:'tds'},
@@ -321,9 +324,17 @@ async function autoDone(kind,ts){
   for(const t of S.tasks.filter(t=>t.auto===kind)){ if(!t.lastDone||ts>t.lastDone){ await saveItem('tasks',Object.assign(clone(t),{lastDone:ts})) } }
 }
 function startInfo(){
+  const mode=startMode(); if(mode==='none') return null;
   const sd=S.settings.startDate; if(!sd) return null; const st=day0(new Date(sd+'T00:00').getTime()); if(!isFinite(st)) return null;
-  const tot=Math.max(1,num(S.settings.startDays)||28), day=Math.floor((day0(Date.now())-st)/DAY)+1;
-  return {st,tot,day,week:Math.ceil(day/7),weeks:Math.ceil(tot/7),end:addDays(st,tot)};
+  const day=Math.floor((day0(Date.now())-st)/DAY)+1, week=Math.ceil(day/7);
+  if(mode==='cycle'){
+    // concluso quando NH4 e NO2 sono ~0 in due test consecutivi che li misurano entrambi
+    const T=S.tests.filter(t=>t.ts>=st&&num(t.v?.nh4)!=null&&num(t.v?.no2)!=null).sort(byTs); let end=null;
+    for(let i=1;i<T.length;i++){ const z=t=>num(t.v.nh4)<=0.02&&num(t.v.no2)<=0.02; if(z(T[i-1])&&z(T[i])){ end=T[i].ts; break } }
+    const done=!!end; return {mode,st,day,week,end,done,show:day>=1&&(!done||Date.now()-end<=7*DAY)};
+  }
+  const tot=Math.max(1,num(S.settings.startDays)||28), end=addDays(st,tot), done=day>tot;
+  return {mode,st,tot,day,week,weeks:Math.ceil(tot/7),end,done,show:day>=1&&day<=tot+7};
 }
 const RO_TYPES={tds:'Lettura TDS',resin:'Resine cambiate',membr:'Membrana cambiata',prefilt:'Prefiltri cambiati'};
 function lastEv(type){ return S.events.filter(e=>e.type===type).sort(byTs).pop() }
@@ -670,13 +681,13 @@ function vHome(){
   const lt = S.tests.length? Math.max(...S.tests.map(t=>t.ts)) : null;
   let h='';
   const si=startInfo();
-  if(si && si.day>=1 && si.day<=si.tot+7){
-    const done=si.day>si.tot, pct=Math.min(100,100*si.day/si.tot);
+  if(si && si.show){
+    const done=si.done, fixed=si.mode==='fixed';
     const nh=lastVal('nh4'), no2=lastVal('no2'), no3=lastVal('no3');
-    h+=`<div class="card"><h2>Avvio vasca <span class="tag">${done?'completato':'settimana '+si.week+' di '+si.weeks}</span></h2>
-      <div class="big" style="font-size:20px">${done?`Avvio completato il ${fdate(si.end,true)}`:`Giorno ${si.day} di ${si.tot}`}</div>
-      <div style="height:8px;background:#0a1a24;border-radius:6px;margin:8px 0;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--acc)"></div></div>
-      <div class="small mut">Partita il ${fdate(si.st,true)}${done?'':` · mancano ${si.tot-si.day+1} giorni`}</div>
+    h+=`<div class="card"><h2>${fixed?'Avvio vasca':'Maturazione'} <span class="tag">${done?'completat'+(fixed?'o':'a'):fixed?'settimana '+si.week+' di '+si.weeks:'settimana '+si.week}</span></h2>
+      <div class="big" style="font-size:20px">${done?(fixed?`Avvio completato il ${fdate(si.end,true)}`:`Ciclo completato il ${fdate(si.end,true)}`):fixed?`Giorno ${si.day} di ${si.tot}`:`Giorno ${si.day}`}</div>
+      ${fixed?`<div style="height:8px;background:#0a1a24;border-radius:6px;margin:8px 0;overflow:hidden"><div style="height:100%;width:${Math.min(100,100*si.day/si.tot)}%;background:var(--acc)"></div></div>`:'<div style="height:6px"></div>'}
+      <div class="small mut">Partita il ${fdate(si.st,true)}${fixed?(done?'':` · mancano ${si.tot-si.day+1} giorni`):(done?` · durata ${Math.round((day0(si.end)-si.st)/DAY)+1} giorni`:' · si conclude quando NH₄ e NO₂ sono a zero in due test di fila')}</div>
       <div class="row small" style="margin-top:8px;gap:14px">${[['NH₄',nh,'nh4'],['NO₂',no2,'no2'],['NO₃',no3,'no3']].map(([n,l,p])=>`<span>${n}: <b>${l?fmt(l.v,P[p].d):'–'}</b>${l?` <span class="mut">(${fdate(l.ts)})</span>`:''}</span>`).join('')}</div>
       <canvas id="cStart" height="140" style="margin-top:8px"></canvas></div>`;
   }
@@ -812,7 +823,7 @@ function vGraf(){
 
 function vManut(){
   let h=`<div class="card"><h2>Scadenze</h2>`;
-  if(!S.tasks.length) h+=`<p class="small mut">Nessuna scadenza impostata.</p><button class="btn sm" id="seedTasks">Crea le scadenze consigliate</button><div class="small mut" style="margin-top:6px">Cambio 10% il 15 e il 30 con Bacter Mix e Nitrix, test settimanale, schiumatoio, TDS osmosi. Potrai modificarle.</div>`;
+  if(!S.tasks.length) h+=`<p class="small mut">Nessuna scadenza impostata.</p><button class="btn sm" id="seedTasks">Crea le scadenze consigliate</button><div class="small mut" style="margin-top:6px">${bacterOn()?`Cambio 10% il 15 e il 30 con ${bactNames().join(' e ')}`:'Cambio 10% settimanale'}, test settimanale, schiumatoio, TDS osmosi. Potrai modificarle.</div>`;
   const T=[...S.tasks].sort((a,b)=>nextDue(a)-nextDue(b));
   h+=`<div class="list">`;
   for(const t of T){
@@ -834,7 +845,7 @@ function vManut(){
       <div class="f" id="tkEvery"><label>Ogni quanti giorni</label><input name="every" inputmode="numeric" value="${esc(String(et.every||7))}"></div>
       <div class="f hide" id="tkDays"><label>Giorni del mese</label><input name="days" value="${esc((et.days||[15,30]).join(', '))}" placeholder="15, 30"></div></div>
     <label class="small" style="display:block;margin-top:8px"><input type="checkbox" name="wc" ${et.wc?'checked':''} style="width:auto;margin-right:6px">È un cambio d'acqua (lo registra nel diario)</label>
-    <label class="small" style="display:block;margin-top:4px"><input type="checkbox" name="bacter" ${et.bacter?'checked':''} style="width:auto;margin-right:6px">Con reintegro Bacter Mix e Bacter Nitrix</label>
+    <label class="small" style="display:block;margin-top:4px"><input type="checkbox" name="bacter" ${et.bacter?'checked':''} style="width:auto;margin-right:6px">Con reintegro batteri (${esc(bactNames().join(' + '))})</label>
     <div class="row" style="margin-top:8px"><button class="btn sm" type="submit">Salva</button>${editTask?'<button class="btn sm sec" type="button" id="tkCancel">Annulla</button>':''}</div></form></details>`;
   if(S.tasks.length) h+=`<hr><button class="btn sm sec" id="icsBtn">📅 Aggiungi al calendario del telefono</button><div class="small mut" style="margin-top:4px">Crea un file .ics con le ricorrenze e un promemoria alle 9:00. Le scadenze "ogni N giorni" nel calendario restano fisse anche se fai la cosa in ritardo.</div>`;
   h+=`</div>`;
@@ -884,9 +895,18 @@ function vSet(){
     <div class="row"><div class="f"><label>Volume netto d'acqua (L)</label><input name="volume" inputmode="decimal" value="${esc(String(s.volume).replace('.',','))}"></div></div>
     <div class="small mut" style="margin-top:4px">Volume reale (vasca + sump, tolte rocce e sabbia). Influisce su tutti i calcoli.</div></div>
   <div class="card"><h2>Avvio e manutenzione</h2>
-    <div class="row"><div class="f"><label>Data avvio vasca</label><input type="date" name="startDate" value="${esc(s.startDate||'')}"></div><div class="f"><label>Durata avvio (giorni)</label><input name="startDays" inputmode="numeric" value="${esc(String(s.startDays??28))}"></div></div>
-    <div class="row" style="margin-top:8px"><div class="f"><label>Bacter Mix/Nitrix: ml per 250 L</label><input name="bacterPer250" inputmode="decimal" value="${esc(String(s.bacterPer250??5).replace('.',','))}"></div><div class="f"><label>Soglia TDS cambio resine (ppm)</label><input name="tdsMax" inputmode="decimal" value="${esc(String(s.tdsMax??3).replace('.',','))}"></div></div>
-    <div class="small mut" style="margin-top:4px">Con ${fmt(vol(),0)} L netti: ${bacterTxt()} a ogni cambio.</div></div>
+    <div class="f"><label>Avvio / maturazione</label><select name="startMode" id="stMode">
+      <option value="fixed" ${startMode()==='fixed'?'selected':''}>Protocollo a durata fissa (es. Yorah)</option>
+      <option value="cycle" ${startMode()==='cycle'?'selected':''}>Fino alla fine del ciclo dell'azoto</option>
+      <option value="none" ${startMode()==='none'?'selected':''}>Nessuno: vasca già matura</option></select></div>
+    <div class="row ${startMode()==='none'?'hide':''}" id="stRow" style="margin-top:8px"><div class="f"><label>Data avvio vasca</label><input type="date" name="startDate" value="${esc(s.startDate||'')}"></div><div class="f ${startMode()!=='fixed'?'hide':''}" id="stDays"><label>Durata (giorni)</label><input name="startDays" inputmode="numeric" value="${esc(String(s.startDays??28))}"></div></div>
+    <div class="small mut" style="margin-top:4px" id="stHelp">${startMode()==='cycle'?'Il riquadro in Home si chiude da solo quando ammoniaca e nitriti risultano a zero in due test consecutivi.':startMode()==='fixed'?'Il riquadro in Home conta giorni e settimane sul totale indicato.':'Nessun riquadro di avvio in Home.'}</div>
+    <hr>
+    <label class="small" style="display:block"><input type="checkbox" name="bacterOn" id="bacOn" ${bacterOn()?'checked':''} style="width:auto;margin-right:6px">Reintegro batteri ai cambi d'acqua</label>
+    <div class="row ${bacterOn()?'':'hide'}" id="bacRow" style="margin-top:8px"><div class="f" style="flex:2"><label>Prodotti (separati da +)</label><input name="bactName" value="${esc(s.bactName||'Bacter Mix + Bacter Nitrix')}"></div><div class="f"><label>ml ogni 250 L</label><input name="bacterPer250" inputmode="decimal" value="${esc(String(s.bacterPer250??5).replace('.',','))}"></div></div>
+    ${bacterOn()?`<div class="small mut" style="margin-top:4px">Con ${fmt(vol(),0)} L netti: ${bacterTxt()} a ogni cambio.</div>`:''}
+    <hr>
+    <div class="row"><div class="f"><label>Soglia TDS cambio resine (ppm)</label><input name="tdsMax" inputmode="decimal" value="${esc(String(s.tdsMax??3).replace('.',','))}"></div></div></div>
   <div class="card"><h2>All In One</h2>
     <div class="small mut" style="margin-bottom:6px">Dati dall'etichetta del prodotto: di quanto alza <b>1 ml in 100 L</b>.</div>
     <div class="row">${TRI.map(p=>`<div class="f"><label>${P[p].n} (${P[p].u})</label><input name="a_${p}" inputmode="decimal" value="${esc(String(s.aio?.[p]??'').replace('.',','))}"></div>`).join('')}</div>
@@ -974,7 +994,7 @@ function drawStart(){
   if(!ds.length){ el.outerHTML='<p class="small mut">Inserisci i test di ammoniaca, nitriti e nitrati per vedere la curva dell\'avvio.</p>'; return }
   if(!window.Chart){ el.outerHTML='<p class="mut small">Grafico non disponibile offline.</p>'; return }
   Chart.defaults.color='#8aa7b6'; Chart.defaults.locale='it-IT';
-  charts.start=new Chart(el,{type:'line',data:{datasets:ds},options:{animation:false,plugins:{legend:{labels:{boxWidth:10}}},scales:{x:xTime(si.st,Math.max(Date.now(),si.end)),y:{...AX,beginAtZero:true,title:{display:true,text:'NH₄ / NO₂'}},y2:{...AX,beginAtZero:true,position:'right',grid:{display:false},title:{display:true,text:'NO₃'}}}}});
+  charts.start=new Chart(el,{type:'line',data:{datasets:ds},options:{animation:false,plugins:{legend:{labels:{boxWidth:10}}},scales:{x:xTime(si.st,Math.max(Date.now(),si.end||addDays(Date.now(),3))),y:{...AX,beginAtZero:true,title:{display:true,text:'NH₄ / NO₂'}},y2:{...AX,beginAtZero:true,position:'right',grid:{display:false},title:{display:true,text:'NO₃'}}}}});
 }
 function drawTds(){
   const el=document.getElementById('cTds'); if(!el) return; const lr=lastEv('resin'); const from=lr?lr.ts:Date.now()-180*DAY;
@@ -1104,7 +1124,7 @@ function bind(){
     openViewer(id) });
   bindSync(); bindAnimali();
   const sd=document.getElementById('seedTasks');
-  if(sd) sd.onclick=async()=>{ sd.disabled=true; for(const t of DEFAULT_TASKS){ if(!await saveItem('tasks',Object.assign({id:uid()},clone(t)))) break } toast('Scadenze create'); render() };
+  if(sd) sd.onclick=async()=>{ sd.disabled=true; for(const t0 of DEFAULT_TASKS){ const t=Object.assign({id:uid()},clone(t0)); if(t.wc&&bacterOn()) Object.assign(t,{name:'Cambio acqua 10% + batteri',kind:'monthly',days:[15,30],bacter:true}); if(!await saveItem('tasks',t)) break } toast('Scadenze create'); render() };
   app.querySelectorAll('[data-done]').forEach(b=>b.onclick=async()=>{ const t=S.tasks.find(x=>x.id===b.dataset.done); if(!t) return;
     if(t.wc){ doneOpen=t.id; render(); return }
     const now=Date.now(); await saveItem('tasks',Object.assign(clone(t),{lastDone:now}));
@@ -1149,6 +1169,9 @@ function bind(){
 
   const fS=document.getElementById('fSet');
   if(fS){
+    const sm=document.getElementById('stMode'); sm.onchange=()=>{ document.getElementById('stRow').classList.toggle('hide',sm.value==='none'); document.getElementById('stDays').classList.toggle('hide',sm.value!=='fixed');
+      document.getElementById('stHelp').textContent= sm.value==='cycle'?'Il riquadro in Home si chiude da solo quando ammoniaca e nitriti risultano a zero in due test consecutivi.':sm.value==='fixed'?'Il riquadro in Home conta giorni e settimane sul totale indicato.':'Nessun riquadro di avvio in Home.' };
+    const bo=document.getElementById('bacOn'); bo.onchange=()=>document.getElementById('bacRow').classList.toggle('hide',!bo.checked);
     document.getElementById('calcRecipe').onclick=()=>{
       const g=id=>num(document.getElementById(id).value)||0;
       const ca=g('r_ca')*0.2726, kh=g('r_hco3')*11.90/1000+g('r_co3')*18.87/1000, mg=g('r_mgcl')*0.1196+g('r_mgso')*0.0986;
@@ -1160,7 +1183,8 @@ function bind(){
       s.conc={ca:num(o.c_ca)??'',kh:num(o.c_kh)??'',mg:num(o.c_mg)??''};
       s.salt={ca:num(o.s_ca)??'',kh:num(o.s_kh)??'',mg:num(o.s_mg)??''};
       s.aio={ca:num(o.a_ca)??'',kh:num(o.a_kh)??'',mg:num(o.a_mg)??''};
-      s.startDate=o.startDate||''; s.startDays=Math.max(1,Math.round(num(o.startDays)||28)); s.bacterPer250=num(o.bacterPer250)??5; s.tdsMax=num(o.tdsMax)??3;
+      s.startMode=o.startMode||'none'; s.startDate=o.startDate||''; s.startDays=Math.max(1,Math.round(num(o.startDays)||28)); s.bacterOn=!!o.bacterOn; s.bactName=(o.bactName||'').trim()||'Bacter Mix + Bacter Nitrix'; s.bacterPer250=num(o.bacterPer250)??5; s.tdsMax=num(o.tdsMax)??3;
+      if(s.startMode!=='none'&&!s.startDate){ toast('Indica la data di avvio'); return }
       s.targets={}; s.showParams=[];
       for(const p of Object.keys(P)){ const lo=num(o['lo_'+p]),hi=num(o['hi_'+p]); if(lo!=null&&hi!=null) s.targets[p]=[Math.min(lo,hi),Math.max(lo,hi)]; if(o['show_'+p]) s.showParams.push(p) }
       S.settings=s; await saveSettings(); toast('Impostazioni salvate') };
