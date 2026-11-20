@@ -98,6 +98,7 @@ hr{border:0;border-top:1px solid var(--line);margin:12px 0}
 <div class="toast" id="toast"></div>
 <input type="file" id="fileIn" accept="application/json,.json" class="hide">
 <input type="file" id="photoIn" accept="image/*" multiple class="hide">
+<input type="file" id="lvPhotoIn" accept="image/*" class="hide">
 <div id="ov" class="ov hide"></div>
 
 <script>
@@ -131,7 +132,7 @@ const DEF_SETTINGS = {
 };
 
 /* ---------- Stato ---------- */
-const S = {tests:[], doses:[], events:[], tasks:[], settings:clone(DEF_SETTINGS), mode:'local', ready:false, stale:false};
+const S = {tests:[], doses:[], events:[], tasks:[], livestock:[], lvPhotos:{}, settings:clone(DEF_SETTINGS), mode:'local', ready:false, stale:false};
 let editTask = null, doneOpen = null;
 let view = 'home', editTest = null, grafParam = 'kh', grafRange = 90, confirmKey = null;
 const charts = {};
@@ -156,8 +157,8 @@ const LS_KEY='reeflog.v1';
 function lastBackup(){ try{ return +localStorage.getItem('reeflog.lastBackup')||0 }catch(e){ return 0 } }
 function snoozeBackup(){ try{ localStorage.setItem('reeflog.lastBackup',Date.now()) }catch(e){} }
 function backupDue(){ return (S.tests.length+S.doses.length+S.events.length)>0 && Date.now()-lastBackup()>14*DAY }
-function lsLoad(){ try{ const j=JSON.parse(localStorage.getItem(LS_KEY)||'null'); if(j){ S.tests=j.tests||[]; S.doses=j.doses||[]; S.events=j.events||[]; S.tasks=j.tasks||[]; S.settings=Object.assign(clone(DEF_SETTINGS),j.settings||{}) } }catch(e){} }
-function lsSave(){ try{ localStorage.setItem(LS_KEY,JSON.stringify({tests:S.tests,doses:S.doses,events:S.events,tasks:S.tasks,settings:S.settings})) }catch(e){} }
+function lsLoad(){ try{ const j=JSON.parse(localStorage.getItem(LS_KEY)||'null'); if(j){ S.tests=j.tests||[]; S.doses=j.doses||[]; S.events=j.events||[]; S.tasks=j.tasks||[]; S.livestock=j.livestock||[]; S.settings=Object.assign(clone(DEF_SETTINGS),j.settings||{}) } }catch(e){} }
+function lsSave(){ try{ localStorage.setItem(LS_KEY,JSON.stringify({tests:S.tests,doses:S.doses,events:S.events,tasks:S.tasks,livestock:S.livestock,settings:S.settings})) }catch(e){} }
 
 async function saveItem(coll,item){
   if(S.mode==='db'){
@@ -192,11 +193,11 @@ async function initStore(){
     const id = user ? await user.id() : null;
     if(!db||!id){ render(); return }
     DB=db; UID=id; base=db.doc(`data/users/${id}/main`); S.mode='db';
-    S.tests=[];S.doses=[];S.events=[];S.tasks=[];S.settings=clone(DEF_SETTINGS); S.stale=true;
-    const pending=new Set(['tests','doses','events','tasks','settings']);
+    S.tests=[];S.doses=[];S.events=[];S.tasks=[];S.livestock=[];S.settings=clone(DEF_SETTINGS); S.stale=true;
+    const pending=new Set(['tests','doses','events','tasks','livestock','settings']);
     const timer=setTimeout(()=>{ if(pending.size){ S.stale=true; toast('Dati non ancora raggiungibili…'); render() } },10000);
     const done=(k,snap)=>{ if(!snap.metadata.fromCache){ pending.delete(k); if(!pending.size){ clearTimeout(timer); S.stale=false } } };
-    for(const c of ['tests','doses','events','tasks']){
+    for(const c of ['tests','doses','events','tasks','livestock']){
       base.collection(c).onSnapshot(snap=>{ S[c]=snap.docs.map(d=>clone(d.data())); done(c,snap); scheduleRender() },
         e=>{ pending.delete(c); handleErr(e) });
     }
@@ -335,7 +336,8 @@ S.photos=[]; let photoSel=null; // null = modalità normale, array = selezione p
 let _pdb=null;
 function pdb(){ if(_pdb) return _pdb; _pdb=new Promise((res,rej)=>{ try{ const r=indexedDB.open('reeflog-photos',1); r.onupgradeneeded=()=>r.result.createObjectStore('photos',{keyPath:'id'}); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error) }catch(e){ rej(e) } }); return _pdb }
 async function ptx(mode,fn){ const db=await pdb(); return new Promise((res,rej)=>{ const tx=db.transaction('photos',mode); const st=tx.objectStore('photos'); const out=fn(st); tx.oncomplete=()=>res(out instanceof IDBRequest?out.result:out); tx.onerror=()=>rej(tx.error) }) }
-async function loadPhotos(){ try{ const all=await ptx('readonly',st=>st.getAll()); S.photos=(all||[]).map(p=>({id:p.id,ts:p.ts,note:p.note||'',thumb:p.thumb})).sort((a,b)=>b.ts-a.ts) }catch(e){ S.photos=[] } }
+async function loadPhotos(){ try{ const all=await ptx('readonly',st=>st.getAll()); const m=(all||[]).map(p=>({id:p.id,ts:p.ts,note:p.note||'',thumb:p.thumb,lv:p.lv||null})).sort((a,b)=>b.ts-a.ts); S.photos=m.filter(p=>!p.lv); S.lvPhotos={}; for(const p of m) if(p.lv) S.lvPhotos[p.id]=p }catch(e){ S.photos=[]; S.lvPhotos={} } }
+function allPhotoMetas(){ return [...S.photos,...Object.values(S.lvPhotos)] }
 async function getPhoto(id){ return ptx('readonly',st=>st.get(id)) }
 async function putPhoto(rec,quiet){ await ptx('readwrite',st=>st.put(rec)); if(!quiet) enqueue('photos',rec.id,'put') }
 async function delPhoto(id,quiet){ await ptx('readwrite',st=>st.delete(id)); if(!quiet) enqueue('photos',id,'del') }
@@ -412,9 +414,86 @@ async function openCompare(idA,idB){
   document.getElementById('ovX').onclick=ovClose;
   o.classList.remove('hide'); ovOpened();
 }
-async function photosForBackup(){ const out=[]; for(const m of S.photos){ const r=await getPhoto(m.id); if(!r||!r.blob) continue;
-  const d=await new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(r.blob) }); out.push({id:r.id,ts:r.ts,note:r.note||'',thumb:r.thumb,data:d}) } return out }
+async function photosForBackup(){ const out=[]; for(const m of allPhotoMetas()){ const r=await getPhoto(m.id); if(!r||!r.blob) continue;
+  const d=await new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(r.blob) }); out.push({id:r.id,ts:r.ts,note:r.note||'',thumb:r.thumb,lv:r.lv||null,data:d}) } return out }
 
+
+
+/* ---------- Animali e coralli ---------- */
+const LV_CAT={fish:['🐠','Pesci'],sps:['🪸','Coralli SPS'],lps:['🪸','Coralli LPS'],soft:['🌿','Coralli molli'],inv:['🦐','Invertebrati'],cuc:['🐌','Squadra pulizia'],other:['•','Altro']};
+const LV_ST={alive:'In vasca',dead:'Perso',gone:'Ceduto'};
+let lvFilter='alive', lvEdit=null, lvPendingPhoto=null;
+function lvAlive(){ return S.livestock.filter(x=>(x.status||'alive')==='alive') }
+function eur(v){ return v==null?'–':v.toLocaleString('it-IT',{style:'currency',currency:'EUR',maximumFractionDigits:v%1?2:0}) }
+function lvCost(x){ return (num(x.price)||0) }
+function lvThumb(x){ const p=x.photo&&S.lvPhotos[x.photo]; return p?p.thumb:null }
+function vAnimali(){
+  const all=S.livestock, alive=lvAlive();
+  const spent=all.reduce((a,x)=>a+lvCost(x),0), val=alive.reduce((a,x)=>a+lvCost(x),0);
+  let h=`<div class="card"><h2>Animali e coralli</h2><div class="grid">
+    <div class="tile"><div class="k">In vasca</div><div class="v">${alive.reduce((a,x)=>a+(num(x.qty)||1),0)}</div><div class="d">${alive.length} ${alive.length===1?'scheda':'schede'}</div></div>
+    <div class="tile"><div class="k">Valore in vasca</div><div class="v" style="font-size:18px">${eur(val)}</div></div>
+    <div class="tile"><div class="k">Speso in totale</div><div class="v" style="font-size:18px">${eur(spent)}</div><div class="d">${all.length-alive.length} persi/ceduti</div></div></div>`;
+  const byCat={}; for(const x of all){ const c=x.cat||'other'; byCat[c]=byCat[c]||{n:0,spent:0,alive:0}; byCat[c].spent+=lvCost(x); byCat[c].n++; if((x.status||'alive')==='alive') byCat[c].alive+=(num(x.qty)||1) }
+  if(all.length){ h+=`<div class="list small" style="margin-top:8px">`; for(const c of Object.keys(LV_CAT)) if(byCat[c]) h+=`<div class="it"><div class="body">${LV_CAT[c][0]} ${LV_CAT[c][1]}</div><div class="mut">${byCat[c].alive} in vasca</div><div style="min-width:70px;text-align:right"><b>${eur(byCat[c].spent)}</b></div></div>`; h+=`</div>` }
+  h+=`<button class="btn" id="lvAdd" style="margin-top:10px;width:100%">+ Aggiungi animale o corallo</button></div>`;
+  if(lvEdit) h+=lvForm();
+  const chips=[['alive','In vasca'],['all','Tutti'],['lost','Persi/ceduti'],...Object.keys(LV_CAT).filter(c=>all.some(x=>(x.cat||'other')===c)).map(c=>[c,LV_CAT[c][1]])];
+  h+=`<div class="chips" style="margin-top:10px">${chips.map(([k,l])=>`<button class="chip ${lvFilter===k?'on':''}" data-lvf="${k}">${l}</button>`).join('')}</div>`;
+  const L=all.filter(x=>{ const st=x.status||'alive'; if(lvFilter==='alive') return st==='alive'; if(lvFilter==='lost') return st!=='alive'; if(lvFilter==='all') return true; return (x.cat||'other')===lvFilter }).sort((a,b)=>b.ts-a.ts);
+  if(!all.length) return h+`<div class="card small mut">Nessuna scheda. Aggiungi i primi abitanti: anche squadra di pulizia e rocce vive con ospiti.</div>`;
+  if(!L.length) return h+`<div class="card small mut">Nessun elemento in questo filtro.</div>`;
+  for(const x of L){ const th=lvThumb(x), st=x.status||'alive', cat=LV_CAT[x.cat||'other']||LV_CAT.other;
+    const days=Math.floor(((st==='alive'?Date.now():(x.endTs||Date.now()))-x.ts)/DAY);
+    h+=`<div class="card row" data-lv="${x.id}" style="flex-wrap:nowrap;align-items:flex-start;gap:12px;${st!=='alive'?'opacity:.6':''}">
+      ${th?`<img src="${th}" style="width:76px;height:76px;object-fit:cover;border-radius:10px;flex:none">`:`<div style="width:76px;height:76px;border-radius:10px;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:30px;flex:none">${cat[0]}</div>`}
+      <div style="flex:1;min-width:0"><div><b>${esc(x.name)}</b>${(num(x.qty)||1)>1?` <span class="mut">×${num(x.qty)}</span>`:''}</div>
+        ${x.species?`<div class="small mut" style="font-style:italic">${esc(x.species)}</div>`:''}
+        <div class="small" style="margin-top:3px"><span class="tag">${cat[1]}</span> ${st!=='alive'?`<span class="tag" style="color:#ffb4b4">${LV_ST[st]} ${x.endTs?fdate(x.endTs):''}</span>`:''}</div>
+        <div class="small mut" style="margin-top:3px">Inserito ${fdate(x.ts,true)} · ${st==='alive'?'in vasca da ':'rimasto '}${days} gg${dayLabel(x.ts)?` · ${dayLabel(x.ts)} dell'avvio`:''}</div>
+        <div class="small" style="margin-top:2px">${x.source?esc(x.source):''}${x.source&&num(x.price)!=null?' · ':''}${num(x.price)!=null?'<b>'+eur(num(x.price))+'</b>':''}</div>
+        ${x.note?`<div class="small mut" style="margin-top:2px">${esc(x.note)}</div>`:''}</div></div>`;
+  }
+  return h;
+}
+function lvForm(){
+  const x=lvEdit, isNew=!x.id, st=x.status||'alive';
+  const th=lvPendingPhoto?lvPendingPhoto.thumb:lvThumb(x);
+  return `<div class="card"><h2>${isNew?'Nuovo abitante':'Modifica scheda'}</h2><form id="fLv">
+    <div class="row" style="flex-wrap:nowrap;align-items:center"><button type="button" id="lvPhotoBtn" style="width:84px;height:84px;border-radius:12px;border:1px dashed var(--line);background:var(--card2);color:var(--mut);padding:0;overflow:hidden;flex:none">${th?`<img src="${th}" style="width:100%;height:100%;object-fit:cover">`:'📷<br><span style="font-size:11px">Foto</span>'}</button>
+      <div style="flex:1"><div class="f"><label>Nome</label><input name="name" value="${esc(x.name||'')}" placeholder="es. Pagliaccio, Acropora verde"></div>
+      <div class="f" style="margin-top:6px"><label>Specie (facoltativo)</label><input name="species" value="${esc(x.species||'')}" placeholder="es. Amphiprion ocellaris"></div></div></div>
+    <div class="row" style="margin-top:8px"><div class="f"><label>Categoria</label><select name="cat">${Object.entries(LV_CAT).map(([k,[i,l]])=>`<option value="${k}" ${ (x.cat||'fish')===k?'selected':''}>${i} ${l}</option>`).join('')}</select></div>
+      <div class="f"><label>Data inserimento</label><input type="date" name="ts" value="${toInput(x.ts||Date.now()).slice(0,10)}"></div></div>
+    <div class="row" style="margin-top:8px"><div class="f" style="flex:2"><label>Provenienza</label><input name="source" value="${esc(x.source||'')}" placeholder="negozio, talea da…, scambio"></div>
+      <div class="f"><label>Prezzo totale €</label><input name="price" inputmode="decimal" value="${num(x.price)!=null?String(num(x.price)).replace('.',','):''}"></div>
+      <div class="f" style="max-width:80px"><label>Quantità</label><input name="qty" inputmode="numeric" value="${esc(String(x.qty||1))}"></div></div>
+    ${isNew?'':`<div class="row" style="margin-top:8px"><div class="f"><label>Stato</label><select name="status" id="lvSt">${Object.entries(LV_ST).map(([k,l])=>`<option value="${k}" ${st===k?'selected':''}>${l}</option>`).join('')}</select></div>
+      <div class="f ${st==='alive'?'hide':''}" id="lvEndF"><label>Dal</label><input type="date" name="endTs" value="${toInput(x.endTs||Date.now()).slice(0,10)}"></div></div>`}
+    <div class="f" style="margin-top:8px"><label>Note</label><input name="note" value="${esc(x.note||'')}" placeholder="posizione in vasca, acclimatazione, alimentazione…"></div>
+    <div class="row" style="margin-top:10px"><button class="btn" type="submit">Salva</button><button class="btn sec" type="button" id="lvCancel">Annulla</button>${isNew?'':`<button class="btn sm danger" type="button" id="lvDel" style="margin-left:auto">Elimina</button>`}</div>
+    ${isNew?'<div class="small mut" style="margin-top:6px">L\'inserimento viene annotato anche nel diario.</div>':''}</form></div>`;
+}
+function dateToTs(v,fallback){ if(!v) return fallback; const d=new Date(v+'T12:00'); return isFinite(d)?d.getTime():fallback }
+function bindAnimali(){
+  const app=document.getElementById('app');
+  const add=document.getElementById('lvAdd'); if(add) add.onclick=()=>{ lvEdit={}; lvPendingPhoto=null; render(); document.getElementById('fLv')?.scrollIntoView({block:'start'}) };
+  app.querySelectorAll('[data-lvf]').forEach(b=>b.onclick=()=>{ lvFilter=b.dataset.lvf; render() });
+  app.querySelectorAll('[data-lv]').forEach(b=>b.onclick=()=>{ lvEdit=clone(S.livestock.find(x=>x.id===b.dataset.lv)); lvPendingPhoto=null; render(); window.scrollTo(0,0) });
+  const f=document.getElementById('fLv'); if(!f) return;
+  document.getElementById('lvCancel').onclick=()=>{ lvEdit=null; lvPendingPhoto=null; render() };
+  document.getElementById('lvPhotoBtn').onclick=()=>document.getElementById('lvPhotoIn').click();
+  const sel=document.getElementById('lvSt'); if(sel) sel.onchange=()=>document.getElementById('lvEndF').classList.toggle('hide',sel.value==='alive');
+  const del=document.getElementById('lvDel'); if(del) del.onclick=async()=>{ if(del.dataset.c!=='1'){ del.dataset.c='1'; del.textContent='Confermi?'; return }
+    const x=lvEdit; if(x.photo){ await delPhoto(x.photo); await loadPhotos() } await delItem('livestock',x.id); lvEdit=null; toast('Scheda eliminata'); render() };
+  f.onsubmit=async e=>{ e.preventDefault(); const o=formVals(f); if(!(o.name||'').trim()){ toast('Inserisci il nome'); return }
+    const isNew=!lvEdit.id; const x=Object.assign(clone(lvEdit),{id:lvEdit.id||uid(),name:o.name.trim(),species:(o.species||'').trim(),cat:o.cat,ts:dateToTs(o.ts,lvEdit.ts||Date.now()),source:(o.source||'').trim(),price:num(o.price),qty:Math.max(1,Math.round(num(o.qty)||1)),note:(o.note||'').trim()});
+    if(!isNew){ x.status=o.status||'alive'; x.endTs= x.status==='alive'? null : dateToTs(o.endTs,Date.now()) } else x.status='alive';
+    if(lvPendingPhoto){ const pid=uid(); await putPhoto({id:pid,ts:Date.now(),note:x.name,thumb:lvPendingPhoto.thumb,blob:lvPendingPhoto.blob,lv:x.id}); if(x.photo) await delPhoto(x.photo); x.photo=pid; await loadPhotos() }
+    if(!await saveItem('livestock',x)) return;
+    if(isNew) await saveItem('events',{id:uid(),ts:x.ts,type:'live',note:`Inserito: ${x.name}${x.qty>1?' ×'+x.qty:''}${x.source?' ('+x.source+')':''}`});
+    lvEdit=null; lvPendingPhoto=null; toast('Scheda salvata'); render() };
+}
 
 /* ---------- Sincronizzazione Supabase ---------- */
 const SB_URL='https://wnzpuucvwtmbdluxhsvy.supabase.co', SB_KEY='sb_publishable_vh-YYrPtI_n1tLvSfxDeJg_KVBvbaJ2';
@@ -423,7 +502,7 @@ let Q={}; try{ Q=JSON.parse(localStorage.getItem('reeflog.queue')||'{}')||{} }ca
 function saveQ(){ try{ localStorage.setItem('reeflog.queue',JSON.stringify(Q)) }catch(e){} }
 function lastSyncTs(){ try{ return +localStorage.getItem('reeflog.lastSync')||0 }catch(e){ return 0 } }
 function enqueue(coll,id,op){ if(!id) return; Q[coll+':'+id]=op; saveQ(); scheduleSync() }
-function enqueueAll(){ for(const c of ['tests','doses','events','tasks']) for(const it of S[c]) Q[c+':'+it.id]='put'; Q['settings:main']='put'; for(const p of S.photos) Q['photos:'+p.id]='put'; saveQ(); scheduleSync() }
+function enqueueAll(){ for(const c of ['tests','doses','events','tasks','livestock']) for(const it of S[c]) Q[c+':'+it.id]='put'; Q['settings:main']='put'; for(const p of allPhotoMetas()) Q['photos:'+p.id]='put'; saveQ(); scheduleSync() }
 function syncLabel(){ if(!sbUser) return 'locale'; if(!navigator.onLine) return '⚠︎ offline'; if(syncing) return '⟳ sincronizzo…'; if(syncErr) return '⚠︎ errore sync'; const n=Object.keys(Q).length; return n?`⟳ ${n} in attesa`:'☁︎ sincronizzato' }
 function updHdr(){ const el=document.getElementById('hdrSub'); if(el) el.innerHTML=`${vol()} L netti<br>${syncLabel()}` }
 let _st=null; function scheduleSync(ms=1500){ updHdr(); if(!sbUser) return; clearTimeout(_st); _st=setTimeout(sync,ms) }
@@ -440,8 +519,8 @@ function needFull(){ try{ return localStorage.getItem('reeflog.syncUser')!==sbUs
 function onLogin(){ if(needFull()) try{ localStorage.removeItem('reeflog.cursor') }catch(e){} sync() }
 // primo collegamento di questo dispositivo: prima scarica, poi invia solo ciò che sul server manca
 function enqueueMissing(seen){
-  for(const c of ['tests','doses','events','tasks']) for(const it of S[c]) if(!seen.has(c+':'+it.id)) Q[c+':'+it.id]='put';
-  for(const p of S.photos) if(!seen.has('photos:'+p.id)) Q['photos:'+p.id]='put';
+  for(const c of ['tests','doses','events','tasks','livestock']) for(const it of S[c]) if(!seen.has(c+':'+it.id)) Q[c+':'+it.id]='put';
+  for(const p of allPhotoMetas()) if(!seen.has('photos:'+p.id)) Q['photos:'+p.id]='put';
   if(!seen.has('settings:main')) Q['settings:main']='put';
   saveQ();
 }
@@ -454,7 +533,7 @@ async function push(){
       const path=`${sbUser.id}/${id}.jpg`;
       if(op==='put'){ const r=await getPhoto(id);
         if(r&&r.blob){ const up=await sb.storage.from('photos').upload(path,r.blob,{upsert:true,contentType:'image/jpeg'}); if(up.error) throw up.error;
-          const {error}=await sb.from('items').upsert({user_id:sbUser.id,coll,id,data:{id,ts:r.ts,note:r.note||'',thumb:r.thumb},deleted:false},{onConflict:'user_id,coll,id'}); if(error) throw error }
+          const {error}=await sb.from('items').upsert({user_id:sbUser.id,coll,id,data:{id,ts:r.ts,note:r.note||'',thumb:r.thumb,lv:r.lv||null},deleted:false},{onConflict:'user_id,coll,id'}); if(error) throw error }
       }else{ await sb.storage.from('photos').remove([path]);
         const {error}=await sb.from('items').upsert({user_id:sbUser.id,coll,id,data:null,deleted:true},{onConflict:'user_id,coll,id'}); if(error) throw error }
       delete Q[k]; saveQ(); updHdr(); continue;
@@ -480,7 +559,7 @@ async function pull(){
       if(r.coll==='photos'){
         const ex=await getPhoto(r.id);
         if(r.deleted){ if(ex){ await delPhoto(r.id,true); photosChanged=true } continue }
-        if(!ex){ const dl=await sb.storage.from('photos').download(`${sbUser.id}/${r.id}.jpg`); if(dl.error||!dl.data) continue; await putPhoto({id:r.id,ts:r.data.ts,note:r.data.note||'',thumb:r.data.thumb,blob:dl.data},true); photosChanged=true }
+        if(!ex){ const dl=await sb.storage.from('photos').download(`${sbUser.id}/${r.id}.jpg`); if(dl.error||!dl.data) continue; await putPhoto({id:r.id,ts:r.data.ts,note:r.data.note||'',thumb:r.data.thumb,lv:r.data.lv||null,blob:dl.data},true); photosChanged=true }
         else if(ex.ts!==r.data.ts||(ex.note||'')!==(r.data.note||'')){ ex.ts=r.data.ts; ex.note=r.data.note||''; await putPhoto(ex,true); photosChanged=true }
         continue;
       }
@@ -554,7 +633,7 @@ function render(){
   let h='';
   if(S.mode==='local' && S.ready && !sbUser && backupDue()) h+=`<div class="banner">I dati sono salvati su questo dispositivo. ${lastBackup()?`Ultimo backup ${Math.floor((Date.now()-lastBackup())/DAY)} giorni fa`:'Non hai ancora fatto un backup'}: <a href="#" data-go="set" style="color:#ffd98a">esporta ora</a>.<button id="bkClose" style="float:right;background:none;border:0;color:#ffd98a;font-size:18px;line-height:1;padding:0 0 0 10px">✕</button></div>`;
   if(S.mode==='db' && S.stale && !S.tests.length && !S.doses.length) h+=`<div class="banner">Caricamento dati…</div>`;
-  h += ({home:vHome,test:vTest,dosi:vDosi,graf:vGraf,diario:vManut,set:vSet,foto:vFoto})[view]();
+  h += ({home:vHome,test:vTest,dosi:vDosi,graf:vGraf,diario:vManut,set:vSet,foto:vFoto,animali:vAnimali})[view]();
   app.innerHTML=h;
   bind();
   if(view==='graf') drawCharts();
@@ -633,6 +712,8 @@ function vHome(){
   h+=`<div class="card"><h2>KH ultimi 60 giorni</h2><canvas id="spark" height="120"></canvas></div>`;
   // promemoria
   const lastWc=S.events.filter(e=>e.type==='wc').sort(byTs).pop();
+  { const al=lvAlive(); if(S.livestock.length) h+=`<div class="card row" data-go="animali" style="justify-content:space-between;cursor:pointer"><span><b>🐠 Animali e coralli</b><br><span class="small mut">${al.reduce((a,x)=>a+(num(x.qty)||1),0)} in vasca · valore ${eur(al.reduce((a,x)=>a+lvCost(x),0))}</span></span><span class="mut">›</span></div>`;
+    else h+=`<div class="card row" style="justify-content:space-between"><span class="small">Registra pesci, coralli e invertebrati</span><button class="btn sm sec" data-go="animali">🐠 Animali</button></div>`; }
   { const lp=S.photos[0];
     h+=`<div class="card"><h2>Foto progressi <span class="tag">${S.photos.length}</span></h2>${lp?`<div class="row" style="flex-wrap:nowrap;align-items:center"><img src="${lp.thumb}" data-go="foto" style="width:96px;height:72px;object-fit:cover;border-radius:9px"><div class="small" style="flex:1">Ultima foto: <b>${fdate(lp.ts,true)}</b>${dayLabel(lp.ts)?` (${dayLabel(lp.ts)})`:''}<br><span class="mut">${Math.floor((Date.now()-lp.ts)/DAY)} giorni fa</span></div></div>`:'<p class="small mut">Nessuna foto ancora.</p>'}
       <div class="row" style="margin-top:8px"><button class="btn sm" id="homeAddPhoto">📷 Aggiungi foto</button><button class="btn sm sec" data-go="foto">Galleria</button></div></div>`; }
@@ -715,7 +796,7 @@ function vGraf(){
 }
 
 function vManut(){
-  let h=`<div class="card row" style="justify-content:space-between"><span><b>Foto della vasca</b> <span class="mut small">${S.photos.length} foto</span></span><button class="btn sm sec" data-go="foto">📷 Galleria</button></div>`;
+  let h=`<div class="card row" style="justify-content:space-between"><button class="btn sm sec" data-go="foto">📷 Foto (${S.photos.length})</button><button class="btn sm sec" data-go="animali">🐠 Animali e coralli (${lvAlive().length})</button></div>`;
   // Scadenze
   h+=`<div class="card"><h2>Scadenze</h2>`;
   if(!S.tasks.length) h+=`<p class="small mut">Nessuna scadenza impostata.</p><button class="btn sm" id="seedTasks">Crea le scadenze consigliate</button><div class="small mut" style="margin-top:6px">Cambio 10% il 15 e il 30 con Bacter Mix e Nitrix, test settimanale, schiumatoio, TDS osmosi. Potrai modificarle.</div>`;
@@ -822,7 +903,7 @@ function vSet(){
   h+=`<div class="small mut">La spunta decide quali parametri vedi in Home.</div></div>
   <div class="card"><button class="btn" type="submit" style="width:100%">Salva impostazioni</button></div></form>
   <div class="card"><h2>Backup</h2><div class="row"><button class="btn sec" id="exp">Esporta JSON</button><button class="btn sec" id="imp">Importa JSON</button><button class="btn sec" id="csv">Copia test in CSV</button></div>
-  ${S.photos.length?`<label class="small" style="display:block;margin-top:8px"><input type="checkbox" id="bkPhotos" checked style="width:auto;margin-right:6px">Includi le ${S.photos.length} foto nel backup (file più grande)</label>`:''}
+  ${allPhotoMetas().length?`<label class="small" style="display:block;margin-top:8px"><input type="checkbox" id="bkPhotos" checked style="width:auto;margin-right:6px">Includi le ${allPhotoMetas().length} foto nel backup (file più grande)</label>`:''}
   <textarea id="expBox" class="hide" style="margin-top:8px;min-height:120px" readonly></textarea>
   <div class="small mut" style="margin-top:6px">${S.tests.length} test · ${S.doses.length} variazioni dose · ${S.events.length} voci diario · archivio ${S.mode==='db'?'sul tuo account (privato)':'locale'}.</div></div>`;
   return h;
@@ -895,7 +976,7 @@ function drawTds(){
 }
 
 /* ---------- Eventi UI ---------- */
-function go(v){ view=v; confirmKey=null; doneOpen=null; editTask=null; photoSel=null; document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v)); render(); window.scrollTo(0,0) }
+function go(v){ view=v; confirmKey=null; doneOpen=null; editTask=null; photoSel=null; lvEdit=null; lvPendingPhoto=null; document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v)); render(); window.scrollTo(0,0) }
 document.getElementById('nav').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b) go(b.dataset.v) });
 
 function formVals(f){ const o={}; new FormData(f).forEach((v,k)=>o[k]=v); return o }
@@ -934,7 +1015,7 @@ function bind(){
     if(photoSel){ const i=photoSel.indexOf(id); if(i>=0) photoSel.splice(i,1); else photoSel.push(id);
       if(photoSel.length===2){ const [x,y]=photoSel; photoSel=null; render(); openCompare(x,y); return } render(); return }
     openViewer(id) });
-  bindSync();
+  bindSync(); bindAnimali();
   const sd=document.getElementById('seedTasks');
   if(sd) sd.onclick=async()=>{ sd.disabled=true; for(const t of DEFAULT_TASKS){ if(!await saveItem('tasks',Object.assign({id:uid()},clone(t)))) break } toast('Scadenze create'); render() };
   app.querySelectorAll('[data-done]').forEach(b=>b.onclick=async()=>{ const t=S.tasks.find(x=>x.id===b.dataset.done); if(!t) return;
@@ -999,7 +1080,7 @@ function bind(){
     document.getElementById('exp').onclick=async()=>{
       const withPh=document.getElementById('bkPhotos')?.checked; if(withPh&&S.photos.length) toast('Preparo le foto…');
       const photos=withPh? await photosForBackup() : undefined;
-      const data=JSON.stringify({app:'reeflog',v:1,exported:new Date().toISOString(),tests:S.tests,doses:S.doses,events:S.events,tasks:S.tasks,settings:S.settings,photos},null,1);
+      const data=JSON.stringify({app:'reeflog',v:1,exported:new Date().toISOString(),tests:S.tests,doses:S.doses,events:S.events,tasks:S.tasks,livestock:S.livestock,settings:S.settings,photos},null,1);
       const fn=`reeflog-backup-${new Date().toISOString().slice(0,10)}.json`;
       try{ const dl=window.claude?.use? await window.claude.use('downloads'):null; if(dl){ await dl.save({filename:fn,data}); toast('Backup pronto'); return } }catch(err){}
       try{ const f=new File([data],fn,{type:'application/json'});
@@ -1023,8 +1104,8 @@ document.getElementById('fileIn').onchange=async e=>{
   if(!j||j.app!=='reeflog'){ toast('Non è un backup Reef Log'); return }
   toast('Importazione in corso…');
   let n=0;
-  for(const c of ['tests','doses','events','tasks']) for(const it of (j[c]||[])){ if(it&&it.id&&(c==='tasks'||isFinite(it.ts))){ if(S.mode==='db'){ try{ await base.collection(c).doc(String(it.id)).set(it); n++ }catch(err){ handleErr(err); return } } else { const a=S[c]; const i=a.findIndex(x=>x.id===it.id); if(i>=0)a[i]=it; else a.push(it); n++ } } }
-  let np=0; if(Array.isArray(j.photos)) for(const p of j.photos){ try{ if(!p||!p.id||!p.data) continue; const blob=await (await fetch(p.data)).blob(); await putPhoto({id:p.id,ts:p.ts,note:p.note||'',thumb:p.thumb,blob}); np++ }catch(err){} }
+  for(const c of ['tests','doses','events','tasks','livestock']) for(const it of (j[c]||[])){ if(it&&it.id&&(c==='tasks'||c==='livestock'||isFinite(it.ts))){ if(S.mode==='db'){ try{ await base.collection(c).doc(String(it.id)).set(it); n++ }catch(err){ handleErr(err); return } } else { const a=S[c]; const i=a.findIndex(x=>x.id===it.id); if(i>=0)a[i]=it; else a.push(it); n++ } } }
+  let np=0; if(Array.isArray(j.photos)) for(const p of j.photos){ try{ if(!p||!p.id||!p.data) continue; const blob=await (await fetch(p.data)).blob(); await putPhoto({id:p.id,ts:p.ts,note:p.note||'',thumb:p.thumb,lv:p.lv||null,blob}); np++ }catch(err){} }
   if(np){ await loadPhotos(); n+=np }
   if(j.settings){ S.settings=Object.assign(clone(DEF_SETTINGS),j.settings); await saveSettings() }
   if(S.mode==='local') lsSave();
@@ -1033,6 +1114,11 @@ document.getElementById('fileIn').onchange=async e=>{
   toast(`Importati ${n} elementi`); render();
 };
 
+document.getElementById('lvPhotoIn').onchange=async e=>{ const f=e.target.files[0]; e.target.value=''; if(!f||!lvEdit) return;
+  try{ const url=URL.createObjectURL(f); const img=await loadImg(url); const blob=await resizeTo(img,1600,0.82); const thumb=await resizeTo(img,360,0.7,'url'); URL.revokeObjectURL(url);
+    const keep=lvFormSnapshot(); lvPendingPhoto={blob,thumb}; render(); lvFormRestore(keep) }catch(err){ toast('Foto non leggibile') } };
+function lvFormSnapshot(){ const f=document.getElementById('fLv'); return f?formVals(f):null }
+function lvFormRestore(o){ const f=document.getElementById('fLv'); if(!f||!o) return; for(const [k,v] of Object.entries(o)){ const el=f.elements[k]; if(el) el.value=v } const sel=document.getElementById('lvSt'); if(sel) document.getElementById('lvEndF').classList.toggle('hide',sel.value==='alive') }
 document.getElementById('photoIn').onchange=e=>{ const fs=[...e.target.files]; e.target.value=''; if(fs.length) addPhotos(fs) };
 window.addEventListener('popstate',()=>{ if(!document.getElementById('ov').classList.contains('hide')){ closeOv(); render() } });
 initStore(); loadPhotos().then(()=>{ if(S.photos.length) render(); initSync() });
