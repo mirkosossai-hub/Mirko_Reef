@@ -55,10 +55,26 @@ textarea{min-height:60px;resize:vertical}
 .tri .h{color:var(--mut);font-size:11px;text-transform:uppercase}
 .dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px}
 .big{font-size:16px;font-weight:700}
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));background:#e6f1f6;color:#07131c;padding:9px 16px;border-radius:999px;font-size:14px;font-weight:600;z-index:9;opacity:0;transition:.25s;pointer-events:none}
+.toast{z-index:30!important;position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom));background:#e6f1f6;color:#07131c;padding:9px 16px;border-radius:999px;font-size:14px;font-weight:600;z-index:9;opacity:0;transition:.25s;pointer-events:none}
 .toast.on{opacity:1}
 canvas{max-width:100%}
 .hide{display:none!important}
+.pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.pgrid .ph{position:relative;aspect-ratio:1;border-radius:9px;overflow:hidden;background:#0a1a24;border:2px solid transparent;padding:0}
+.pgrid .ph img{width:100%;height:100%;object-fit:cover;display:block}
+.pgrid .ph span{position:absolute;left:0;right:0;bottom:0;font-size:10px;padding:3px 5px;background:linear-gradient(0deg,#000a,#0000);color:#fff;text-align:left}
+.pgrid .ph.sel{border-color:var(--acc)}
+.pgrid .ph b{position:absolute;top:4px;right:4px;background:var(--acc);color:#04222a;border-radius:50%;width:20px;height:20px;font-size:12px;display:flex;align-items:center;justify-content:center}
+.ov{position:fixed;inset:0;z-index:20;background:#03080c;display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top) + 8px) 10px calc(env(safe-area-inset-bottom) + 10px)}
+.ov .top{display:flex;align-items:center;gap:8px;color:#fff;padding:4px 2px 8px}
+.ov .stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0}
+.ov .stage img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px}
+.ov .cmp{position:relative;max-width:100%;max-height:100%}
+.ov .cmp img{display:block;max-width:100%;max-height:70vh}
+.ov .cmp .b{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.ov .cmp .line{position:absolute;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 6px #000}
+.ov .lbl{position:absolute;top:6px;font-size:11px;background:#0009;color:#fff;padding:2px 7px;border-radius:999px}
+.ov .nav{position:absolute;top:50%;transform:translateY(-50%);background:#0007;color:#fff;border:0;border-radius:50%;width:42px;height:42px;font-size:22px}
 .tag{font-size:11px;padding:2px 7px;border-radius:999px;background:var(--card2);color:var(--mut);border:1px solid var(--line)}
 details summary{cursor:pointer;color:var(--acc);font-size:14px;margin:4px 0}
 hr{border:0;border-top:1px solid var(--line);margin:12px 0}
@@ -81,6 +97,8 @@ hr{border:0;border-top:1px solid var(--line);margin:12px 0}
 </nav>
 <div class="toast" id="toast"></div>
 <input type="file" id="fileIn" accept="application/json,.json" class="hide">
+<input type="file" id="photoIn" accept="image/*" multiple class="hide">
+<div id="ov" class="ov hide"></div>
 
 <script>
 "use strict";
@@ -312,6 +330,91 @@ function buildIcs(){
   L.push('END:VCALENDAR'); return L.join('\r\n');
 }
 
+/* ---------- Foto (IndexedDB, solo su questo dispositivo) ---------- */
+S.photos=[]; let photoSel=null; // null = modalità normale, array = selezione per confronto
+let _pdb=null;
+function pdb(){ if(_pdb) return _pdb; _pdb=new Promise((res,rej)=>{ try{ const r=indexedDB.open('reeflog-photos',1); r.onupgradeneeded=()=>r.result.createObjectStore('photos',{keyPath:'id'}); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error) }catch(e){ rej(e) } }); return _pdb }
+async function ptx(mode,fn){ const db=await pdb(); return new Promise((res,rej)=>{ const tx=db.transaction('photos',mode); const st=tx.objectStore('photos'); const out=fn(st); tx.oncomplete=()=>res(out&&out.result!==undefined?out.result:out); tx.onerror=()=>rej(tx.error) }) }
+async function loadPhotos(){ try{ const all=await ptx('readonly',st=>st.getAll()); S.photos=(all||[]).map(p=>({id:p.id,ts:p.ts,note:p.note||'',thumb:p.thumb})).sort((a,b)=>b.ts-a.ts) }catch(e){ S.photos=[] } }
+async function getPhoto(id){ return ptx('readonly',st=>st.get(id)) }
+async function putPhoto(rec){ await ptx('readwrite',st=>st.put(rec)) }
+async function delPhoto(id){ await ptx('readwrite',st=>st.delete(id)) }
+function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src }) }
+async function resizeTo(img,max,q,type){ const sc=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)); const c=document.createElement('canvas'); c.width=Math.round(img.naturalWidth*sc); c.height=Math.round(img.naturalHeight*sc); c.getContext('2d').drawImage(img,0,0,c.width,c.height); return type==='url'? c.toDataURL('image/jpeg',q) : new Promise(r=>c.toBlob(r,'image/jpeg',q)) }
+async function addPhotos(files){
+  let n=0; toast('Elaborazione foto…');
+  for(const f of files){ try{
+    const url=URL.createObjectURL(f); const img=await loadImg(url);
+    const blob=await resizeTo(img,1600,0.82); const thumb=await resizeTo(img,360,0.7,'url'); URL.revokeObjectURL(url);
+    const lm=f.lastModified; const ts=(lm&&lm<=Date.now()&&lm>Date.now()-5*365*DAY)?lm:Date.now();
+    await putPhoto({id:uid(),ts,note:'',blob,thumb}); n++ }catch(e){} }
+  await loadPhotos(); toast(n?`${n} foto aggiunte`:'Foto non leggibile'); render();
+}
+function dayLabel(ts){ const si=startInfo(); if(!si) return ''; const d=Math.floor((day0(ts)-si.st)/DAY)+1; return d>=1?`giorno ${d}`:'' }
+function vFoto(){
+  const sel=photoSel;
+  let h=`<div class="card"><h2>Foto della vasca <span class="tag">${S.photos.length}</span></h2>
+    <div class="row"><button class="btn" id="addPhoto">📷 Aggiungi foto</button>${S.photos.length>=2?`<button class="btn sec" id="cmpBtn">${sel?'Annulla confronto':'Confronta'}</button>`:''}${S.photos.length>=2&&!sel?`<button class="btn sec" id="cmpFirst">Prima vs ora</button>`:''}</div>
+    ${sel?`<div class="small" style="margin-top:8px;color:var(--acc)">Tocca due foto da confrontare (${sel.length}/2)</div>`:''}
+    <div class="small mut" style="margin-top:6px">Le foto restano su questo telefono (ridotte a 1600 px). Per salvarle altrove usa il backup con foto in Impostazioni.</div></div>`;
+  if(!S.photos.length) return h+`<div class="card mut small">Ancora nessuna foto. Scattane una oggi: tra qualche settimana sarà bello confrontarla.</div>`;
+  let lastM='';
+  h+=`<div class="card">`;
+  const groups={}; for(const p of S.photos){ const m=new Date(p.ts).toLocaleDateString('it-IT',{month:'long',year:'numeric'}); (groups[m]=groups[m]||[]).push(p) }
+  for(const m in groups){ h+=`<h2 style="margin-top:6px">${m}</h2><div class="pgrid" style="margin-bottom:10px">`;
+    for(const p of groups[m]){ const i=sel?sel.indexOf(p.id):-1; h+=`<button class="ph ${i>=0?'sel':''}" data-ph="${p.id}"><img src="${p.thumb}" alt=""><span>${fdate(p.ts)}${dayLabel(p.ts)?' · '+dayLabel(p.ts):''}</span>${i>=0?`<b>${i+1}</b>`:''}</button>` }
+    h+=`</div>` }
+  return h+`</div>`;
+}
+let ovUrls=[];
+function ovOpened(){ try{ if(!(history.state&&history.state.ov)) history.pushState({ov:1},'') }catch(e){} }
+function ovClose(){ if(history.state&&history.state.ov){ history.back() } else { closeOv(); render() } }
+function closeOv(){ const o=document.getElementById('ov'); o.classList.add('hide'); o.innerHTML=''; ovUrls.forEach(u=>URL.revokeObjectURL(u)); ovUrls=[]; document.body.style.overflow='' }
+async function openViewer(id){
+  const list=S.photos; let idx=list.findIndex(p=>p.id===id); if(idx<0) return;
+  const o=document.getElementById('ov'); document.body.style.overflow='hidden';
+  const show=async()=>{
+    ovUrls.forEach(u=>URL.revokeObjectURL(u)); ovUrls=[];
+    const meta=list[idx]; const rec=await getPhoto(meta.id); const url=rec&&rec.blob?URL.createObjectURL(rec.blob):meta.thumb; if(rec&&rec.blob) ovUrls.push(url);
+    o.innerHTML=`<div class="top"><div style="flex:1"><b>${new Date(meta.ts).toLocaleDateString('it-IT',{weekday:'short',day:'numeric',month:'long',year:'numeric'})}</b><div class="small" style="color:#bbb">${dayLabel(meta.ts)}${dayLabel(meta.ts)?' dall\'avvio · ':''}${idx+1} di ${list.length}</div></div>
+      <button class="btn sm sec" id="ovDel">🗑</button><button class="btn sm sec" id="ovX">✕</button></div>
+      <div class="stage"><img src="${url}" alt="">${idx<list.length-1?'<button class="nav" id="ovPrev" style="left:4px">‹</button>':''}${idx>0?'<button class="nav" id="ovNext" style="right:4px">›</button>':''}</div>
+      <div class="row" style="margin-top:8px"><input id="ovNote" placeholder="Nota (es. nuovo corallo, alga in calo…)" value="${esc(meta.note)}" style="flex:1"><input type="date" id="ovDate" value="${toInput(meta.ts).slice(0,10)}" style="width:150px"></div>`;
+    document.getElementById('ovX').onclick=ovClose;
+    const pv=document.getElementById('ovPrev'); if(pv) pv.onclick=()=>{ idx++; show() };
+    const nx=document.getElementById('ovNext'); if(nx) nx.onclick=()=>{ idx--; show() };
+    const del=document.getElementById('ovDel'); del.onclick=async()=>{ if(del.dataset.c!=='1'){ del.dataset.c='1'; del.textContent='Elimina?'; del.classList.add('danger'); return }
+      await delPhoto(meta.id); await loadPhotos(); toast('Foto eliminata'); if(!S.photos.length){ ovClose(); return } idx=Math.min(idx,S.photos.length-1); list.splice(0,list.length,...S.photos); show() };
+    const save=async()=>{ const nEl=document.getElementById('ovNote'), dEl=document.getElementById('ovDate'); if(!nEl||!dEl) return; const note=nEl.value.trim(), dv=dEl.value; const r=await getPhoto(meta.id); if(!r) return;
+      let ts=r.ts; if(dv){ const old=new Date(r.ts); const nd=new Date(dv+'T00:00'); nd.setHours(old.getHours(),old.getMinutes()); if(isFinite(nd)) ts=nd.getTime() }
+      if(note===r.note&&ts===r.ts) return; r.note=note; r.ts=ts; await putPhoto(r); meta.note=note; meta.ts=ts; await loadPhotos(); toast('Salvato') };
+    document.getElementById('ovNote').onchange=save; document.getElementById('ovDate').onchange=save;
+    // swipe
+    let x0=null; const stg=o.querySelector('.stage'); stg.ontouchstart=e=>{x0=e.touches[0].clientX}; stg.ontouchend=e=>{ if(x0==null) return; const dx=e.changedTouches[0].clientX-x0; x0=null; if(dx>50&&idx<list.length-1){idx++;show()} else if(dx<-50&&idx>0){idx--;show()} };
+  };
+  o.classList.remove('hide'); ovOpened(); await show();
+}
+async function openCompare(idA,idB){
+  let [a,b]=[S.photos.find(p=>p.id===idA),S.photos.find(p=>p.id===idB)]; if(!a||!b) return; if(a.ts>b.ts) [a,b]=[b,a];
+  const [ra,rb]=await Promise.all([getPhoto(a.id),getPhoto(b.id)]);
+  const ua=URL.createObjectURL(ra.blob), ub=URL.createObjectURL(rb.blob); ovUrls=[ua,ub];
+  const o=document.getElementById('ov'); document.body.style.overflow='hidden';
+  const days=Math.round((day0(b.ts)-day0(a.ts))/DAY);
+  o.innerHTML=`<div class="top"><div style="flex:1"><b>Prima e dopo</b><div class="small" style="color:#bbb">${fdate(a.ts,true)} → ${fdate(b.ts,true)} · ${days} giorni</div></div><button class="btn sm sec" id="ovX">✕</button></div>
+    <div class="stage"><div class="cmp" id="cmpBox"><img src="${ua}" alt=""><img class="b" id="cmpB" src="${ub}" alt=""><div class="line" id="cmpLine"></div>
+      <span class="lbl" style="left:6px">${fdate(a.ts)}</span><span class="lbl" style="right:6px">${fdate(b.ts)}</span></div></div>
+    <input type="range" id="cmpR" min="0" max="100" value="50" style="margin-top:12px;accent-color:#2ec4d6">
+    <div class="small" style="color:#bbb;text-align:center;margin-top:4px">Trascina per scoprire la foto più recente</div>`;
+  const set=v=>{ document.getElementById('cmpB').style.clipPath=`inset(0 0 0 ${v}%)`; document.getElementById('cmpLine').style.left=v+'%' };
+  set(50); document.getElementById('cmpR').oninput=e=>set(e.target.value);
+  const box=document.getElementById('cmpBox'); const drag=e=>{ const r=box.getBoundingClientRect(); const x=(e.touches?e.touches[0].clientX:e.clientX)-r.left; const v=Math.max(0,Math.min(100,100*x/r.width)); document.getElementById('cmpR').value=v; set(v) };
+  box.ontouchmove=e=>{ e.preventDefault(); drag(e) }; box.onmousemove=e=>{ if(e.buttons) drag(e) };
+  document.getElementById('ovX').onclick=ovClose;
+  o.classList.remove('hide'); ovOpened();
+}
+async function photosForBackup(){ const out=[]; for(const m of S.photos){ const r=await getPhoto(m.id); if(!r||!r.blob) continue;
+  const d=await new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(r.blob) }); out.push({id:r.id,ts:r.ts,note:r.note||'',thumb:r.thumb,data:d}) } return out }
+
 /* ---------- Render ---------- */
 function render(){
   const app=document.getElementById('app');
@@ -321,7 +424,7 @@ function render(){
   let h='';
   if(S.mode==='local' && S.ready && backupDue()) h+=`<div class="banner">I dati sono salvati su questo dispositivo. ${lastBackup()?`Ultimo backup ${Math.floor((Date.now()-lastBackup())/DAY)} giorni fa`:'Non hai ancora fatto un backup'}: <a href="#" data-go="set" style="color:#ffd98a">esporta ora</a>.<button id="bkClose" style="float:right;background:none;border:0;color:#ffd98a;font-size:18px;line-height:1;padding:0 0 0 10px">✕</button></div>`;
   if(S.mode==='db' && S.stale && !S.tests.length && !S.doses.length) h+=`<div class="banner">Caricamento dati…</div>`;
-  h += ({home:vHome,test:vTest,dosi:vDosi,graf:vGraf,diario:vManut,set:vSet})[view]();
+  h += ({home:vHome,test:vTest,dosi:vDosi,graf:vGraf,diario:vManut,set:vSet,foto:vFoto})[view]();
   app.innerHTML=h;
   bind();
   if(view==='graf') drawCharts();
@@ -400,6 +503,9 @@ function vHome(){
   h+=`<div class="card"><h2>KH ultimi 60 giorni</h2><canvas id="spark" height="120"></canvas></div>`;
   // promemoria
   const lastWc=S.events.filter(e=>e.type==='wc').sort(byTs).pop();
+  { const lp=S.photos[0];
+    h+=`<div class="card"><h2>Foto progressi <span class="tag">${S.photos.length}</span></h2>${lp?`<div class="row" style="flex-wrap:nowrap;align-items:center"><img src="${lp.thumb}" data-go="foto" style="width:96px;height:72px;object-fit:cover;border-radius:9px"><div class="small" style="flex:1">Ultima foto: <b>${fdate(lp.ts,true)}</b>${dayLabel(lp.ts)?` (${dayLabel(lp.ts)})`:''}<br><span class="mut">${Math.floor((Date.now()-lp.ts)/DAY)} giorni fa</span></div></div>`:'<p class="small mut">Nessuna foto ancora.</p>'}
+      <div class="row" style="margin-top:8px"><button class="btn sm" id="homeAddPhoto">📷 Aggiungi foto</button><button class="btn sm sec" data-go="foto">Galleria</button></div></div>`; }
   h+=`<div class="card"><h2>Promemoria</h2><div class="small">`;
   h+= lastWc?`Ultimo cambio d'acqua: <b>${fdate(lastWc.ts)}</b> (${Math.floor((Date.now()-lastWc.ts)/DAY)} gg fa, ${fmt(num(lastWc.liters),1)} L)`:'Nessun cambio d\'acqua registrato.';
   const lt2=S.tests.length? Math.floor((Date.now()-Math.max(...S.tests.map(t=>t.ts)))/DAY):null;
@@ -479,7 +585,7 @@ function vGraf(){
 }
 
 function vManut(){
-  let h='';
+  let h=`<div class="card row" style="justify-content:space-between"><span><b>Foto della vasca</b> <span class="mut small">${S.photos.length} foto</span></span><button class="btn sm sec" data-go="foto">📷 Galleria</button></div>`;
   // Scadenze
   h+=`<div class="card"><h2>Scadenze</h2>`;
   if(!S.tasks.length) h+=`<p class="small mut">Nessuna scadenza impostata.</p><button class="btn sm" id="seedTasks">Crea le scadenze consigliate</button><div class="small mut" style="margin-top:6px">Cambio 10% il 15 e il 30 con Bacter Mix e Nitrix, test settimanale, schiumatoio, TDS osmosi. Potrai modificarle.</div>`;
@@ -586,6 +692,7 @@ function vSet(){
   h+=`<div class="small mut">La spunta decide quali parametri vedi in Home.</div></div>
   <div class="card"><button class="btn" type="submit" style="width:100%">Salva impostazioni</button></div></form>
   <div class="card"><h2>Backup</h2><div class="row"><button class="btn sec" id="exp">Esporta JSON</button><button class="btn sec" id="imp">Importa JSON</button><button class="btn sec" id="csv">Copia test in CSV</button></div>
+  ${S.photos.length?`<label class="small" style="display:block;margin-top:8px"><input type="checkbox" id="bkPhotos" checked style="width:auto;margin-right:6px">Includi le ${S.photos.length} foto nel backup (file più grande)</label>`:''}
   <textarea id="expBox" class="hide" style="margin-top:8px;min-height:120px" readonly></textarea>
   <div class="small mut" style="margin-top:6px">${S.tests.length} test · ${S.doses.length} variazioni dose · ${S.events.length} voci diario · archivio ${S.mode==='db'?'sul tuo account (privato)':'locale'}.</div></div>`;
   return h;
@@ -658,7 +765,7 @@ function drawTds(){
 }
 
 /* ---------- Eventi UI ---------- */
-function go(v){ view=v; confirmKey=null; doneOpen=null; editTask=null; document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v)); render(); window.scrollTo(0,0) }
+function go(v){ view=v; confirmKey=null; doneOpen=null; editTask=null; photoSel=null; document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v)); render(); window.scrollTo(0,0) }
 document.getElementById('nav').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b) go(b.dataset.v) });
 
 function formVals(f){ const o={}; new FormData(f).forEach((v,k)=>o[k]=v); return o }
@@ -689,6 +796,14 @@ function bind(){
       : {id:uid(),ts:fromInput(o.ts),kind:'balling',ca:num(o.ca)||0,kh:num(o.kh)||0,mg:num(o.mg)||0,note:(o.note||'').trim()};
     if(await saveItem('doses',item)){ toast('Dose salvata'); render() } };
 
+  const ap=document.getElementById('addPhoto')||document.getElementById('homeAddPhoto'); if(ap) ap.onclick=()=>document.getElementById('photoIn').click();
+  const hp=document.getElementById('homeAddPhoto'); if(hp) hp.onclick=()=>document.getElementById('photoIn').click();
+  const cb=document.getElementById('cmpBtn'); if(cb) cb.onclick=()=>{ photoSel=photoSel?null:[]; render() };
+  const cf=document.getElementById('cmpFirst'); if(cf) cf.onclick=()=>openCompare(S.photos[S.photos.length-1].id,S.photos[0].id);
+  app.querySelectorAll('[data-ph]').forEach(b=>b.onclick=()=>{ const id=b.dataset.ph;
+    if(photoSel){ const i=photoSel.indexOf(id); if(i>=0) photoSel.splice(i,1); else photoSel.push(id);
+      if(photoSel.length===2){ const [x,y]=photoSel; photoSel=null; render(); openCompare(x,y); return } render(); return }
+    openViewer(id) });
   const sd=document.getElementById('seedTasks');
   if(sd) sd.onclick=async()=>{ sd.disabled=true; for(const t of DEFAULT_TASKS){ if(!await saveItem('tasks',Object.assign({id:uid()},clone(t)))) break } toast('Scadenze create'); render() };
   app.querySelectorAll('[data-done]').forEach(b=>b.onclick=async()=>{ const t=S.tasks.find(x=>x.id===b.dataset.done); if(!t) return;
@@ -751,7 +866,9 @@ function bind(){
       for(const p of Object.keys(P)){ const lo=num(o['lo_'+p]),hi=num(o['hi_'+p]); if(lo!=null&&hi!=null) s.targets[p]=[Math.min(lo,hi),Math.max(lo,hi)]; if(o['show_'+p]) s.showParams.push(p) }
       S.settings=s; await saveSettings(); toast('Impostazioni salvate') };
     document.getElementById('exp').onclick=async()=>{
-      const data=JSON.stringify({app:'reeflog',v:1,exported:new Date().toISOString(),tests:S.tests,doses:S.doses,events:S.events,tasks:S.tasks,settings:S.settings},null,1);
+      const withPh=document.getElementById('bkPhotos')?.checked; if(withPh&&S.photos.length) toast('Preparo le foto…');
+      const photos=withPh? await photosForBackup() : undefined;
+      const data=JSON.stringify({app:'reeflog',v:1,exported:new Date().toISOString(),tests:S.tests,doses:S.doses,events:S.events,tasks:S.tasks,settings:S.settings,photos},null,1);
       const fn=`reeflog-backup-${new Date().toISOString().slice(0,10)}.json`;
       try{ const dl=window.claude?.use? await window.claude.use('downloads'):null; if(dl){ await dl.save({filename:fn,data}); toast('Backup pronto'); return } }catch(err){}
       try{ const f=new File([data],fn,{type:'application/json'});
@@ -776,13 +893,17 @@ document.getElementById('fileIn').onchange=async e=>{
   toast('Importazione in corso…');
   let n=0;
   for(const c of ['tests','doses','events','tasks']) for(const it of (j[c]||[])){ if(it&&it.id&&(c==='tasks'||isFinite(it.ts))){ if(S.mode==='db'){ try{ await base.collection(c).doc(String(it.id)).set(it); n++ }catch(err){ handleErr(err); return } } else { const a=S[c]; const i=a.findIndex(x=>x.id===it.id); if(i>=0)a[i]=it; else a.push(it); n++ } } }
+  let np=0; if(Array.isArray(j.photos)) for(const p of j.photos){ try{ if(!p||!p.id||!p.data) continue; const blob=await (await fetch(p.data)).blob(); await putPhoto({id:p.id,ts:p.ts,note:p.note||'',thumb:p.thumb,blob}); np++ }catch(err){} }
+  if(np){ await loadPhotos(); n+=np }
   if(j.settings){ S.settings=Object.assign(clone(DEF_SETTINGS),j.settings); await saveSettings() }
   if(S.mode==='local') lsSave();
   snoozeBackup();
   toast(`Importati ${n} elementi`); render();
 };
 
-initStore();
+document.getElementById('photoIn').onchange=e=>{ const fs=[...e.target.files]; e.target.value=''; if(fs.length) addPhotos(fs) };
+window.addEventListener('popstate',()=>{ if(!document.getElementById('ov').classList.contains('hide')){ closeOv(); render() } });
+initStore(); loadPhotos().then(()=>{ if(S.photos.length) render() });
 if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
 if(navigator.storage&&navigator.storage.persist) navigator.storage.persist().catch(()=>{});
 </script>
