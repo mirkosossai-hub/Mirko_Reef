@@ -164,17 +164,17 @@ async function saveItem(coll,item){
     try{ await base.collection(coll).doc(item.id).set(item) }
     catch(e){ handleErr(e); return false }
   }else{
-    const arr=S[coll]; const i=arr.findIndex(x=>x.id===item.id); if(i>=0) arr[i]=item; else arr.push(item); lsSave(); render();
+    const arr=S[coll]; const i=arr.findIndex(x=>x.id===item.id); if(i>=0) arr[i]=item; else arr.push(item); lsSave(); enqueue(coll,item.id,'put'); render();
   }
   return true;
 }
 async function delItem(coll,id){
   if(S.mode==='db'){ try{ await base.collection(coll).doc(id).delete() }catch(e){ handleErr(e) } }
-  else{ S[coll]=S[coll].filter(x=>x.id!==id); lsSave(); render() }
+  else{ S[coll]=S[coll].filter(x=>x.id!==id); lsSave(); enqueue(coll,id,'del'); render() }
 }
 async function saveSettings(){
   if(S.mode==='db'){ try{ await DB.doc(`data/users/${UID}/settings`).set(clone(S.settings)) }catch(e){ handleErr(e); return } }
-  else lsSave();
+  else{ lsSave(); enqueue('settings','main','put') }
   render();
 }
 function handleErr(e){
@@ -334,11 +334,11 @@ function buildIcs(){
 S.photos=[]; let photoSel=null; // null = modalità normale, array = selezione per confronto
 let _pdb=null;
 function pdb(){ if(_pdb) return _pdb; _pdb=new Promise((res,rej)=>{ try{ const r=indexedDB.open('reeflog-photos',1); r.onupgradeneeded=()=>r.result.createObjectStore('photos',{keyPath:'id'}); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error) }catch(e){ rej(e) } }); return _pdb }
-async function ptx(mode,fn){ const db=await pdb(); return new Promise((res,rej)=>{ const tx=db.transaction('photos',mode); const st=tx.objectStore('photos'); const out=fn(st); tx.oncomplete=()=>res(out&&out.result!==undefined?out.result:out); tx.onerror=()=>rej(tx.error) }) }
+async function ptx(mode,fn){ const db=await pdb(); return new Promise((res,rej)=>{ const tx=db.transaction('photos',mode); const st=tx.objectStore('photos'); const out=fn(st); tx.oncomplete=()=>res(out instanceof IDBRequest?out.result:out); tx.onerror=()=>rej(tx.error) }) }
 async function loadPhotos(){ try{ const all=await ptx('readonly',st=>st.getAll()); S.photos=(all||[]).map(p=>({id:p.id,ts:p.ts,note:p.note||'',thumb:p.thumb})).sort((a,b)=>b.ts-a.ts) }catch(e){ S.photos=[] } }
 async function getPhoto(id){ return ptx('readonly',st=>st.get(id)) }
-async function putPhoto(rec){ await ptx('readwrite',st=>st.put(rec)) }
-async function delPhoto(id){ await ptx('readwrite',st=>st.delete(id)) }
+async function putPhoto(rec,quiet){ await ptx('readwrite',st=>st.put(rec)); if(!quiet) enqueue('photos',rec.id,'put') }
+async function delPhoto(id,quiet){ await ptx('readwrite',st=>st.delete(id)); if(!quiet) enqueue('photos',id,'del') }
 function loadImg(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src }) }
 async function resizeTo(img,max,q,type){ const sc=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)); const c=document.createElement('canvas'); c.width=Math.round(img.naturalWidth*sc); c.height=Math.round(img.naturalHeight*sc); c.getContext('2d').drawImage(img,0,0,c.width,c.height); return type==='url'? c.toDataURL('image/jpeg',q) : new Promise(r=>c.toBlob(r,'image/jpeg',q)) }
 async function addPhotos(files){
@@ -415,14 +415,144 @@ async function openCompare(idA,idB){
 async function photosForBackup(){ const out=[]; for(const m of S.photos){ const r=await getPhoto(m.id); if(!r||!r.blob) continue;
   const d=await new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(r.blob) }); out.push({id:r.id,ts:r.ts,note:r.note||'',thumb:r.thumb,data:d}) } return out }
 
+
+/* ---------- Sincronizzazione Supabase ---------- */
+const SB_URL='https://wnzpuucvwtmbdluxhsvy.supabase.co', SB_KEY='sb_publishable_vh-YYrPtI_n1tLvSfxDeJg_KVBvbaJ2';
+let sb=null, sbUser=null, syncing=false, syncErr='', syncAgain=false;
+let Q={}; try{ Q=JSON.parse(localStorage.getItem('reeflog.queue')||'{}')||{} }catch(e){ Q={} }
+function saveQ(){ try{ localStorage.setItem('reeflog.queue',JSON.stringify(Q)) }catch(e){} }
+function lastSyncTs(){ try{ return +localStorage.getItem('reeflog.lastSync')||0 }catch(e){ return 0 } }
+function enqueue(coll,id,op){ if(!id) return; Q[coll+':'+id]=op; saveQ(); scheduleSync() }
+function enqueueAll(){ for(const c of ['tests','doses','events','tasks']) for(const it of S[c]) Q[c+':'+it.id]='put'; Q['settings:main']='put'; for(const p of S.photos) Q['photos:'+p.id]='put'; saveQ(); scheduleSync() }
+function syncLabel(){ if(!sbUser) return 'locale'; if(!navigator.onLine) return '⚠︎ offline'; if(syncing) return '⟳ sincronizzo…'; if(syncErr) return '⚠︎ errore sync'; const n=Object.keys(Q).length; return n?`⟳ ${n} in attesa`:'☁︎ sincronizzato' }
+function updHdr(){ const el=document.getElementById('hdrSub'); if(el) el.innerHTML=`${vol()} L netti<br>${syncLabel()}` }
+let _st=null; function scheduleSync(ms=1500){ updHdr(); if(!sbUser) return; clearTimeout(_st); _st=setTimeout(sync,ms) }
+function loadScript(src){ return new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src=src; sc.onload=res; sc.onerror=rej; document.head.appendChild(sc) }) }
+async function initSync(){
+  try{
+    if(!window.supabase) await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2');
+    sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+    sb.auth.onAuthStateChange((ev,session)=>{ const u=session?.user||null; const changed=(u?.id)!==(sbUser?.id); sbUser=u; if(changed){ if(u) onLogin(); scheduleRender() } });
+    const {data}=await sb.auth.getSession(); if(data?.session?.user && !sbUser){ sbUser=data.session.user; onLogin(); scheduleRender() }
+  }catch(e){ sb=null; scheduleRender() }
+}
+function needFull(){ try{ return localStorage.getItem('reeflog.syncUser')!==sbUser.id }catch(e){ return true } }
+function onLogin(){ if(needFull()) try{ localStorage.removeItem('reeflog.cursor') }catch(e){} sync() }
+// primo collegamento di questo dispositivo: prima scarica, poi invia solo ciò che sul server manca
+function enqueueMissing(seen){
+  for(const c of ['tests','doses','events','tasks']) for(const it of S[c]) if(!seen.has(c+':'+it.id)) Q[c+':'+it.id]='put';
+  for(const p of S.photos) if(!seen.has('photos:'+p.id)) Q['photos:'+p.id]='put';
+  if(!seen.has('settings:main')) Q['settings:main']='put';
+  saveQ();
+}
+function itemData(coll,id){ if(coll==='settings') return clone(S.settings); const it=(S[coll]||[]).find(x=>x.id===id); return it?clone(it):null }
+async function push(){
+  const keys=Object.keys(Q); if(!keys.length) return;
+  const rows=[], done=[];
+  for(const k of keys){ const i=k.indexOf(':'), coll=k.slice(0,i), id=k.slice(i+1), op=Q[k];
+    if(coll==='photos'){
+      const path=`${sbUser.id}/${id}.jpg`;
+      if(op==='put'){ const r=await getPhoto(id);
+        if(r&&r.blob){ const up=await sb.storage.from('photos').upload(path,r.blob,{upsert:true,contentType:'image/jpeg'}); if(up.error) throw up.error;
+          const {error}=await sb.from('items').upsert({user_id:sbUser.id,coll,id,data:{id,ts:r.ts,note:r.note||'',thumb:r.thumb},deleted:false},{onConflict:'user_id,coll,id'}); if(error) throw error }
+      }else{ await sb.storage.from('photos').remove([path]);
+        const {error}=await sb.from('items').upsert({user_id:sbUser.id,coll,id,data:null,deleted:true},{onConflict:'user_id,coll,id'}); if(error) throw error }
+      delete Q[k]; saveQ(); updHdr(); continue;
+    }
+    const data= op==='put'? itemData(coll,id) : null;
+    if(op==='put'&&!data){ done.push(k); continue }
+    rows.push({user_id:sbUser.id,coll,id,data,deleted:op==='del'}); done.push(k);
+  }
+  for(let i=0;i<rows.length;i+=200){ const {error}=await sb.from('items').upsert(rows.slice(i,i+200),{onConflict:'user_id,coll,id'}); if(error) throw error }
+  for(const k of done) if(Q[k]!==undefined) delete Q[k]; saveQ();
+}
+async function pull(){
+  let cur=''; try{ cur=localStorage.getItem('reeflog.cursor')||'' }catch(e){}
+  const from = cur? new Date(new Date(cur).getTime()-60000).toISOString() : '1970-01-01T00:00:00Z';
+  let maxTs=cur, changed=false, photosChanged=false; const seen=new Set();
+  for(let page=0;page<50;page++){
+    const {data,error}=await sb.from('items').select('coll,id,data,deleted,updated_at').gt('updated_at',from).order('updated_at',{ascending:true}).range(page*1000,page*1000+999);
+    if(error) throw error;
+    for(const r of data){
+      if(!maxTs||r.updated_at>maxTs) maxTs=r.updated_at; seen.add(r.coll+':'+r.id);
+      if(Q[r.coll+':'+r.id]!==undefined) continue; // modifica locale non ancora inviata: vince quella
+      if(r.coll==='settings'){ if(!r.deleted&&r.data&&JSON.stringify(r.data)!==JSON.stringify(S.settings)){ S.settings=Object.assign(clone(DEF_SETTINGS),r.data); changed=true } continue }
+      if(r.coll==='photos'){
+        const ex=await getPhoto(r.id);
+        if(r.deleted){ if(ex){ await delPhoto(r.id,true); photosChanged=true } continue }
+        if(!ex){ const dl=await sb.storage.from('photos').download(`${sbUser.id}/${r.id}.jpg`); if(dl.error||!dl.data) continue; await putPhoto({id:r.id,ts:r.data.ts,note:r.data.note||'',thumb:r.data.thumb,blob:dl.data},true); photosChanged=true }
+        else if(ex.ts!==r.data.ts||(ex.note||'')!==(r.data.note||'')){ ex.ts=r.data.ts; ex.note=r.data.note||''; await putPhoto(ex,true); photosChanged=true }
+        continue;
+      }
+      if(!S[r.coll]||!Array.isArray(S[r.coll])) continue;
+      const arr=S[r.coll], i=arr.findIndex(x=>x.id===r.id);
+      if(r.deleted){ if(i>=0){ arr.splice(i,1); changed=true } }
+      else if(r.data){ if(i<0){ arr.push(r.data); changed=true } else if(JSON.stringify(arr[i])!==JSON.stringify(r.data)){ arr[i]=r.data; changed=true } }
+    }
+    if(data.length<1000) break;
+  }
+  if(maxTs) try{ localStorage.setItem('reeflog.cursor',maxTs) }catch(e){}
+  if(changed) lsSave();
+  if(photosChanged) await loadPhotos();
+  if(changed||photosChanged) scheduleRender();
+  return seen;
+}
+async function sync(){
+  if(!sb||!sbUser||!navigator.onLine){ updHdr(); return }
+  if(syncing){ syncAgain=true; return }
+  syncing=true; syncErr=''; updHdr();
+  try{
+    if(needFull()){ const seen=await pull(); enqueueMissing(seen); await push(); try{ localStorage.setItem('reeflog.syncUser',sbUser.id) }catch(e){} }
+    else { await push(); await pull() }
+    try{ localStorage.setItem('reeflog.lastSync',Date.now()) }catch(e){} }
+  catch(e){ syncErr=(e&&e.message)||'errore'; console.warn('sync',e) }
+  finally{ syncing=false; updHdr(); if(view==='set'&&!isTyping()) scheduleRender(); if(syncAgain){ syncAgain=false; scheduleSync(500) } }
+}
+window.addEventListener('online',()=>scheduleSync(300));
+window.addEventListener('offline',updHdr);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') scheduleSync(300) });
+setInterval(()=>{ if(document.visibilityState==='visible') sync() },60000);
+function vSync(){
+  let h=`<div class="card"><h2>Sincronizzazione</h2>`;
+  if(!sb) return h+`<p class="small mut">Servizio non raggiungibile (sei offline?). I dati restano salvati qui e si sincronizzeranno più tardi.</p></div>`;
+  if(sbUser){
+    const n=Object.keys(Q).length, ls=lastSyncTs();
+    h+=`<div class="small">Collegato come <b>${esc(sbUser.email||'')}</b></div>
+      <div class="small mut" style="margin-top:4px">${ls?'Ultima sincronizzazione: '+fdate(ls)+' '+ftime(ls):'Mai sincronizzato'}${n?` · ${n} modifiche in attesa`:''}</div>
+      ${syncErr?`<div class="small" style="color:var(--bad);margin-top:4px">Errore: ${esc(syncErr)}</div>`:''}
+      <div class="row" style="margin-top:10px"><button class="btn sm" id="syNow">Sincronizza ora</button><button class="btn sm sec" id="syOut">Esci</button></div>
+      <div class="small mut" style="margin-top:6px">Dati e foto si sincronizzano da soli su tutti i dispositivi collegati con questo account. Funziona anche offline: le modifiche partono appena torna la rete.</div>`;
+  }else{
+    h+=`<form id="fSync"><div class="small mut" style="margin-bottom:8px">Accedi con lo stesso account su telefono e PC per avere gli stessi dati ovunque.</div>
+      <div class="f"><label>Email</label><input name="email" type="email" autocomplete="email"></div>
+      <div class="f" style="margin-top:8px"><label>Password</label><input name="pass" type="password" autocomplete="current-password"></div>
+      <div class="row" style="margin-top:10px"><button class="btn" type="submit">Accedi</button><button class="btn sec" type="button" id="syReg">Crea account</button></div>
+      <div id="syMsg" class="small" style="margin-top:6px"></div></form>`;
+  }
+  return h+`</div>`;
+}
+function bindSync(){
+  const f=document.getElementById('fSync'), msg=t=>{ const m=document.getElementById('syMsg'); if(m) m.textContent=t };
+  if(f){
+    f.onsubmit=async e=>{ e.preventDefault(); const o=formVals(f); msg('Accesso…');
+      const {error}=await sb.auth.signInWithPassword({email:(o.email||'').trim(),password:o.pass||''});
+      if(error) msg(/confirm/i.test(error.message)?'Devi prima confermare l\'email: controlla la posta.':/invalid/i.test(error.message)?'Email o password errate.':error.message); else { toast('Accesso effettuato'); render() } };
+    document.getElementById('syReg').onclick=async()=>{ const o=formVals(f); if(!o.email||(o.pass||'').length<6){ msg('Inserisci email e una password di almeno 6 caratteri.'); return } msg('Creo l\'account…');
+      const {data,error}=await sb.auth.signUp({email:o.email.trim(),password:o.pass,options:{emailRedirectTo:location.origin+location.pathname}});
+      if(error) msg(error.message); else if(data.session) { toast('Account creato'); render() } else msg('Account creato: apri il link di conferma che ti ho mandato via email, poi accedi qui.') };
+  }
+  const sn=document.getElementById('syNow'); if(sn) sn.onclick=async()=>{ sn.disabled=true; await sync(); toast(syncErr?'Errore di sincronizzazione':'Sincronizzato'); render() };
+  const so=document.getElementById('syOut'); if(so) so.onclick=async()=>{ if(so.dataset.c!=='1'){ so.dataset.c='1'; so.textContent='Confermi?'; return } await sb.auth.signOut(); sbUser=null; toast('Disconnesso: i dati restano su questo dispositivo'); render() };
+}
+
 /* ---------- Render ---------- */
 function render(){
   const app=document.getElementById('app');
   Object.values(charts).forEach(c=>c.destroy()); for(const k in charts) delete charts[k];
   const sub=document.getElementById('hdrSub');
-  sub.innerHTML = `${vol()} L netti<br>${S.mode==='db'?'☁︎ sincronizzato':'locale'}`;
+  sub.innerHTML = `${vol()} L netti<br>${S.mode==='db'?'☁︎ sincronizzato':syncLabel()}`;
   let h='';
-  if(S.mode==='local' && S.ready && backupDue()) h+=`<div class="banner">I dati sono salvati su questo dispositivo. ${lastBackup()?`Ultimo backup ${Math.floor((Date.now()-lastBackup())/DAY)} giorni fa`:'Non hai ancora fatto un backup'}: <a href="#" data-go="set" style="color:#ffd98a">esporta ora</a>.<button id="bkClose" style="float:right;background:none;border:0;color:#ffd98a;font-size:18px;line-height:1;padding:0 0 0 10px">✕</button></div>`;
+  if(S.mode==='local' && S.ready && !sbUser && backupDue()) h+=`<div class="banner">I dati sono salvati su questo dispositivo. ${lastBackup()?`Ultimo backup ${Math.floor((Date.now()-lastBackup())/DAY)} giorni fa`:'Non hai ancora fatto un backup'}: <a href="#" data-go="set" style="color:#ffd98a">esporta ora</a>.<button id="bkClose" style="float:right;background:none;border:0;color:#ffd98a;font-size:18px;line-height:1;padding:0 0 0 10px">✕</button></div>`;
   if(S.mode==='db' && S.stale && !S.tests.length && !S.doses.length) h+=`<div class="banner">Caricamento dati…</div>`;
   h += ({home:vHome,test:vTest,dosi:vDosi,graf:vGraf,diario:vManut,set:vSet,foto:vFoto})[view]();
   app.innerHTML=h;
@@ -653,7 +783,7 @@ function vDiario(){
 
 function vSet(){
   const s=S.settings;
-  let h=`<form id="fSet"><div class="card"><h2>Vasca</h2>
+  let h=vSync()+`<form id="fSet"><div class="card"><h2>Vasca</h2>
     <div class="row"><div class="f"><label>Volume netto d'acqua (L)</label><input name="volume" inputmode="decimal" value="${esc(String(s.volume).replace('.',','))}"></div></div>
     <div class="small mut" style="margin-top:4px">Volume reale (vasca + sump, tolte rocce e sabbia). Influisce su tutti i calcoli.</div></div>
   <div class="card"><h2>Avvio e manutenzione</h2>
@@ -804,6 +934,7 @@ function bind(){
     if(photoSel){ const i=photoSel.indexOf(id); if(i>=0) photoSel.splice(i,1); else photoSel.push(id);
       if(photoSel.length===2){ const [x,y]=photoSel; photoSel=null; render(); openCompare(x,y); return } render(); return }
     openViewer(id) });
+  bindSync();
   const sd=document.getElementById('seedTasks');
   if(sd) sd.onclick=async()=>{ sd.disabled=true; for(const t of DEFAULT_TASKS){ if(!await saveItem('tasks',Object.assign({id:uid()},clone(t)))) break } toast('Scadenze create'); render() };
   app.querySelectorAll('[data-done]').forEach(b=>b.onclick=async()=>{ const t=S.tasks.find(x=>x.id===b.dataset.done); if(!t) return;
@@ -898,12 +1029,13 @@ document.getElementById('fileIn').onchange=async e=>{
   if(j.settings){ S.settings=Object.assign(clone(DEF_SETTINGS),j.settings); await saveSettings() }
   if(S.mode==='local') lsSave();
   snoozeBackup();
+  if(sbUser) enqueueAll();
   toast(`Importati ${n} elementi`); render();
 };
 
 document.getElementById('photoIn').onchange=e=>{ const fs=[...e.target.files]; e.target.value=''; if(fs.length) addPhotos(fs) };
 window.addEventListener('popstate',()=>{ if(!document.getElementById('ov').classList.contains('hide')){ closeOv(); render() } });
-initStore(); loadPhotos().then(()=>{ if(S.photos.length) render() });
+initStore(); loadPhotos().then(()=>{ if(S.photos.length) render(); initSync() });
 if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
 if(navigator.storage&&navigator.storage.persist) navigator.storage.persist().catch(()=>{});
 </script>
