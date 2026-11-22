@@ -122,6 +122,8 @@ hr{border:0;border-top:1px solid var(--line);margin:12px 0}
 
 <script>
 "use strict";
+const LOCAL_ONLY=/*LOCAL_ONLY*/false; // true nella versione app Android (nessuna sincronizzazione online)
+const CAP=()=>window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()?window.Capacitor:null;
 /* ---------- Parametri ---------- */
 const P = {
   kh:  {n:'KH',        u:'dKH', d:2, t:[7.5,9]},
@@ -186,16 +188,18 @@ async function saveItem(coll,item){
   }else{
     const arr=S[coll]; const i=arr.findIndex(x=>x.id===item.id); if(i>=0) arr[i]=item; else arr.push(item); lsSave(); enqueue(coll,item.id,'put'); render();
   }
+  if(coll==='tasks') scheduleNotif();
   return true;
 }
 async function delItem(coll,id){
   if(S.mode==='db'){ try{ await base.collection(coll).doc(id).delete() }catch(e){ handleErr(e) } }
   else{ S[coll]=S[coll].filter(x=>x.id!==id); lsSave(); enqueue(coll,id,'del'); render() }
+  if(coll==='tasks') scheduleNotif();
 }
 async function saveSettings(){
   if(S.mode==='db'){ try{ await DB.doc(`data/users/${UID}/settings`).set(clone(S.settings)) }catch(e){ handleErr(e); return } }
   else{ lsSave(); enqueue('settings','main','put') }
-  render();
+  render(); scheduleNotif();
 }
 function handleErr(e){
   const c=e&&e.code;
@@ -340,6 +344,8 @@ const RO_TYPES={tds:'Lettura TDS',resin:'Resine cambiate',membr:'Membrana cambia
 function lastEv(type){ return S.events.filter(e=>e.type===type).sort(byTs).pop() }
 function tdsState(v){ const mx=num(S.settings.tdsMax)||3; if(v==null) return ['','–']; if(v>=mx) return ['s-bad','cambia le resine']; if(v>0) return ['s-warn','accettabile']; return ['s-ok','perfetto'] }
 async function saveFile(fn,data,mime){
+  const C=CAP(); const plug=n=>C&&((C.Plugins&&C.Plugins[n])||(C.registerPlugin&&C.registerPlugin(n))); const FS=plug('Filesystem'), SH=plug('Share');
+  if(FS&&SH){ try{ const w=await FS.writeFile({path:fn,data,directory:'CACHE',encoding:'utf8'}); await SH.share({title:fn,files:[w.uri],dialogTitle:'Salva o invia '+fn}); return 'shared' }catch(err){ if(/cancel/i.test(String(err&&err.message))) return 'abort'; console.warn(err) } }
   try{ const dl=window.claude?.use? await window.claude.use('downloads'):null; if(dl){ await dl.save({filename:fn,data}); return 'saved' } }catch(err){}
   try{ const f=new File([data],fn,{type:mime}); if(navigator.canShare&&navigator.canShare({files:[f]})){ await navigator.share({files:[f],title:fn}); return 'shared' } }catch(err){ if(err&&err.name==='AbortError') return 'abort' }
   try{ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([data],{type:mime})); a.download=fn; document.body.appendChild(a); a.click(); a.remove(); return 'downloaded' }catch(err){}
@@ -449,6 +455,89 @@ async function photosForBackup(){ const out=[]; for(const m of allPhotoMetas()){
 
 
 
+
+/* ---------- Notifiche (app Android) ---------- */
+function LNp(){ const C=CAP(); return C&&((C.Plugins&&C.Plugins.LocalNotifications)||(C.registerPlugin&&C.registerPlugin('LocalNotifications'))) }
+function notifOn(){ return !!S.settings.notifOn }
+function notifTime(){ const m=/^(\d{1,2}):(\d{2})$/.exec(S.settings.notifTime||'09:00'); return m?[+m[1],+m[2]]:[9,0] }
+function atTime(dayTs){ const [hh,mm]=notifTime(); const d=new Date(dayTs); d.setHours(hh,mm,0,0); return d.getTime() }
+function notifPlan(){
+  // elenco delle notifiche da programmare per le prossime settimane
+  const out=[], now=Date.now(), until=addDays(day0(now),45);
+  if(!notifOn()) return out;
+  const before=!!S.settings.notifDayBefore, overdue=S.settings.notifOverdue!==false;
+  for(const t of S.tasks){ if(!t.notify) continue;
+    const extra=t.bacter?' · '+bacterTxt():'';
+    // prossime occorrenze: simulo il "fatto" alla data di scadenza per calcolare le successive
+    let tt=clone(t); let due=nextDue(tt);
+    for(let k=0;k<12&&due<=until;k++){
+      const dd=Math.round((due-day0(now))/DAY);
+      if(dd<0){ // scaduta: richiamo quotidiano per 7 giorni
+        if(overdue) for(let j=0;j<7;j++){ const ts=atTime(addDays(day0(now),j)); if(ts>now) out.push({ts,title:`⚠️ ${t.name}`,body:`In ritardo di ${-dd+j} giorn${-dd+j===1?'o':'i'}${extra}`,task:t.id}) }
+      }else{
+        const ts=atTime(due); if(ts>now) out.push({ts,title:`🐠 ${t.name}`,body:`Da fare oggi${extra}`,task:t.id});
+        if(before){ const tb=atTime(addDays(due,-1)); if(tb>now) out.push({ts:tb,title:`Domani: ${t.name}`,body:`Promemoria per domani${extra}`,task:t.id}) }
+        if(overdue&&k===0){ const nd=nextDue(Object.assign(clone(tt),{lastDone:due+12*3600000})); for(let j=1;j<=6;j++){ const tr=atTime(addDays(due,j)); if(tr>=atTime(nd)) break; if(tr>now) out.push({ts:tr,title:`⚠️ ${t.name}`,body:`Non ancora segnata come fatta (${j} giorn${j===1?'o':'i'} di ritardo)${extra}`,task:t.id,ifNotDone:true}) } }
+      }
+      if(dd<0) break;
+      tt.lastDone=due+12*3600000; due=nextDue(tt);
+    }
+  }
+  return out.sort((a,b)=>a.ts-b.ts).slice(0,60);
+}
+let _nt=null; function scheduleNotif(){ clearTimeout(_nt); _nt=setTimeout(rescheduleNotif,700) }
+async function rescheduleNotif(){
+  const LN=LNp(); if(!LN) return;
+  try{
+    const p=await LN.getPending(); if(p&&p.notifications&&p.notifications.length) await LN.cancel({notifications:p.notifications.map(n=>({id:n.id}))});
+    if(!notifOn()) return;
+    const perm=await LN.checkPermissions(); if(perm.display!=='granted') return;
+    // i richiami "in ritardo" dopo la scadenza servono solo finché la scadenza non viene segnata: al "Fatto" si riprogramma tutto
+    const plan=notifPlan();
+    if(!plan.length) return;
+    await LN.schedule({notifications:plan.map((n,i)=>({id:i+1,title:n.title,body:n.body,schedule:{at:new Date(n.ts),allowWhileIdle:true},channelId:'scadenze',smallIcon:'ic_stat_reef',iconColor:'#2ec4d6',extra:{task:n.task}}))});
+  }catch(e){ console.warn('notifiche',e) }
+}
+async function initNotif(){
+  const LN=LNp(); if(!LN) return;
+  try{ await LN.createChannel({id:'scadenze',name:'Scadenze acquario',description:'Cambi d\'acqua, test e manutenzioni',importance:4,visibility:1,vibration:true}) }catch(e){}
+  try{ LN.addListener('localNotificationActionPerformed',()=>{ go('manut') }) }catch(e){}
+  rescheduleNotif();
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') scheduleNotif() });
+}
+function vNotif(){
+  const app=!!LNp(), s=S.settings;
+  let h=`<div class="card"><h2>Notifiche</h2>`;
+  if(!app) return h+`<div class="small mut">Le notifiche sono disponibili nell'app Android.</div></div>`;
+  h+=`<label class="row" style="justify-content:space-between;flex-wrap:nowrap"><span><b>Attiva notifiche</b><br><span class="small mut">Avvisi sul telefono anche ad app chiusa</span></span><input type="checkbox" id="nOn" ${notifOn()?'checked':''} style="width:22px;height:22px"></label>`;
+  if(notifOn()){
+    h+=`<hr><div class="row"><div class="f"><label>Orario degli avvisi</label><input type="time" id="nTime" value="${esc(s.notifTime||'09:00')}"></div></div>
+      <label class="small" style="display:block;margin-top:10px"><input type="checkbox" id="nBefore" ${s.notifDayBefore?'checked':''} style="width:auto;margin-right:6px">Avvisami anche il giorno prima</label>
+      <label class="small" style="display:block;margin-top:6px"><input type="checkbox" id="nOver" ${s.notifOverdue!==false?'checked':''} style="width:auto;margin-right:6px">Ricordamelo ogni giorno finché non la segno come fatta</label>
+      <hr><div class="small mut" style="margin-bottom:6px">Scegli quali scadenze notificare:</div>`;
+    if(!S.tasks.length) h+=`<div class="small mut">Nessuna scadenza: creale in <a href="#" data-go="manut" style="color:var(--acc)">Manutenzione</a>.</div>`;
+    for(const t of [...S.tasks].sort((a,b)=>nextDue(a)-nextDue(b))) h+=`<label class="row" style="justify-content:space-between;flex-wrap:nowrap;padding:8px 0;border-top:1px solid var(--line)"><span><b style="font-size:14px">${esc(t.name)}</b><br><span class="small mut">${cadence(t)} · prossima ${fdate(nextDue(t))}</span></span><input type="checkbox" data-ntask="${t.id}" ${t.notify?'checked':''} style="width:22px;height:22px;flex:none"></label>`;
+    const n=notifPlan().length; h+=`<div class="small mut" style="margin-top:8px">${n?`${n} avvisi programmati nelle prossime settimane.`:'Nessun avviso programmato.'}</div>`;
+    h+=`<button class="btn sm sec" id="nTest" style="margin-top:8px">Invia una notifica di prova</button>`;
+  }
+  return h+`</div>`;
+}
+function bindNotif(){
+  const on=document.getElementById('nOn'); if(!on) return; const LN=LNp();
+  on.onchange=async()=>{
+    if(on.checked){ let p=await LN.checkPermissions(); if(p.display!=='granted') p=await LN.requestPermissions();
+      if(p.display!=='granted'){ on.checked=false; toast('Permesso negato: abilitalo nelle impostazioni Android di Reef Log'); return }
+      const first=!('notifOn' in S.settings);
+      S.settings=Object.assign(clone(S.settings),{notifOn:true}); await saveSettings();
+      if(first&&S.tasks.length&&!S.tasks.some(t=>t.notify)) toast('Ora scegli quali scadenze notificare'); }
+    else { S.settings=Object.assign(clone(S.settings),{notifOn:false}); await saveSettings(); toast('Notifiche disattivate') } };
+  const tm=document.getElementById('nTime'); if(tm) tm.onchange=async()=>{ S.settings=Object.assign(clone(S.settings),{notifTime:tm.value||'09:00'}); await saveSettings(); toast('Orario salvato') };
+  const bf=document.getElementById('nBefore'); if(bf) bf.onchange=async()=>{ S.settings=Object.assign(clone(S.settings),{notifDayBefore:bf.checked}); await saveSettings() };
+  const ov=document.getElementById('nOver'); if(ov) ov.onchange=async()=>{ S.settings=Object.assign(clone(S.settings),{notifOverdue:ov.checked}); await saveSettings() };
+  document.querySelectorAll('[data-ntask]').forEach(c=>c.onchange=async()=>{ const t=S.tasks.find(x=>x.id===c.dataset.ntask); if(!t) return; await saveItem('tasks',Object.assign(clone(t),{notify:c.checked})); toast(c.checked?'Notifica attivata':'Notifica disattivata') });
+  const ts=document.getElementById('nTest'); if(ts) ts.onclick=async()=>{ try{ await LN.schedule({notifications:[{id:999,title:'🐠 Reef Log',body:'Le notifiche funzionano!',schedule:{at:new Date(Date.now()+3000),allowWhileIdle:true},channelId:'scadenze',smallIcon:'ic_stat_reef',iconColor:'#2ec4d6'}]}); toast('Arriva tra 3 secondi') }catch(e){ toast('Errore: '+(e.message||e)) } };
+}
+
 /* ---------- Animali e coralli ---------- */
 const LV_CAT={fish:['🐠','Pesci'],sps:['🪸','Coralli SPS'],lps:['🪸','Coralli LPS'],soft:['🌿','Coralli molli'],inv:['🦐','Invertebrati'],cuc:['🐌','Squadra pulizia'],other:['•','Altro']};
 const LV_ST={alive:'In vasca',dead:'Perso',gone:'Ceduto'};
@@ -533,7 +622,7 @@ function saveQ(){ try{ localStorage.setItem('reeflog.queue',JSON.stringify(Q)) }
 function lastSyncTs(){ try{ return +localStorage.getItem('reeflog.lastSync')||0 }catch(e){ return 0 } }
 function enqueue(coll,id,op){ if(!id) return; Q[coll+':'+id]=op; saveQ(); scheduleSync() }
 function enqueueAll(){ for(const c of ['tests','doses','events','tasks','livestock']) for(const it of S[c]) Q[c+':'+it.id]='put'; Q['settings:main']='put'; for(const p of allPhotoMetas()) Q['photos:'+p.id]='put'; saveQ(); scheduleSync() }
-function syncLabel(){ if(!sbUser) return 'locale'; if(!navigator.onLine) return '⚠︎ offline'; if(syncing) return '⟳ sincronizzo…'; if(syncErr) return '⚠︎ errore sync'; const n=Object.keys(Q).length; return n?`⟳ ${n} in attesa`:'☁︎ sincronizzato' }
+function syncLabel(){ if(LOCAL_ONLY) return 'sul telefono'; if(!sbUser) return 'locale'; if(!navigator.onLine) return '⚠︎ offline'; if(syncing) return '⟳ sincronizzo…'; if(syncErr) return '⚠︎ errore sync'; const n=Object.keys(Q).length; return n?`⟳ ${n} in attesa`:'☁︎ sincronizzato' }
 function updHdr(){ const el=document.getElementById('hdrSub'); if(el) el.innerHTML=`${vol()} L netti<br>${syncLabel()}` }
 let _st=null; function scheduleSync(ms=1500){ updHdr(); if(!sbUser) return; clearTimeout(_st); _st=setTimeout(sync,ms) }
 function loadScript(src){ return new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src=src; sc.onload=res; sc.onerror=rej; document.head.appendChild(sc) }) }
@@ -621,7 +710,7 @@ window.addEventListener('online',()=>scheduleSync(300));
 window.addEventListener('offline',updHdr);
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') scheduleSync(300) });
 setInterval(()=>{ if(document.visibilityState==='visible') sync() },60000);
-function vSyncPage(){ let h=vSync()+`  <div class="card"><h2>Backup</h2><div class="row"><button class="btn sec" id="exp">Esporta JSON</button><button class="btn sec" id="imp">Importa JSON</button><button class="btn sec" id="csv">Copia test in CSV</button></div>
+function vSyncPage(){ let h=(LOCAL_ONLY?'':vSync())+`  <div class="card"><h2>Backup</h2><div class="row"><button class="btn sec" id="exp">Esporta JSON</button><button class="btn sec" id="imp">Importa JSON</button><button class="btn sec" id="csv">Copia test in CSV</button></div>
   ${allPhotoMetas().length?`<label class="small" style="display:block;margin-top:8px"><input type="checkbox" id="bkPhotos" checked style="width:auto;margin-right:6px">Includi le ${allPhotoMetas().length} foto nel backup (file più grande)</label>`:''}
   <textarea id="expBox" class="hide" style="margin-top:8px;min-height:120px" readonly></textarea>
   <div class="small mut" style="margin-top:6px">${S.tests.length} test · ${S.doses.length} variazioni dose · ${S.events.length} voci diario · archivio ${S.mode==='db'?'sul tuo account (privato)':'locale'}.</div></div>`;
@@ -680,6 +769,12 @@ function render(){
 function vHome(){
   const lt = S.tests.length? Math.max(...S.tests.map(t=>t.ts)) : null;
   let h='';
+  if(!S.settings.welcomed && !(S.tests.length||S.doses.length||S.events.length||S.tasks.length||S.livestock.length||S.photos.length)){
+    h+=`<div class="card" style="border-color:var(--acc)"><h2>Benvenuto in Reef Log</h2>
+      <div class="small">Tutto è già pronto e i dati restano su questo dispositivo. Per calcoli corretti imposta tre cose:</div>
+      <div class="small" style="margin:8px 0 0 2px;line-height:1.7">1. il <b>volume netto</b> della vasca<br>2. il <b>metodo di avvio</b> (o "nessuno" se è già matura)<br>3. il <b>prodotto per la triade</b> (Balling o All In One)</div>
+      <div class="row" style="margin-top:10px"><button class="btn sm" id="wGo">Apri impostazioni</button><button class="btn sm sec" id="wX">Più tardi</button></div></div>`;
+  }
   const si=startInfo();
   if(si && si.show){
     const done=si.done, fixed=si.mode==='fixed';
@@ -827,7 +922,7 @@ function vManut(){
   const T=[...S.tasks].sort((a,b)=>nextDue(a)-nextDue(b));
   h+=`<div class="list">`;
   for(const t of T){
-    h+=`<div class="it" style="flex-wrap:wrap"><div class="body"><b>${esc(t.name)}</b><div class="small mut">${cadence(t)}${t.lastDone?` · ultima ${fdate(t.lastDone)}`:''}${t.auto==='test'?' · si spunta salvando un test':''}${t.auto==='tds'?' · si spunta salvando un TDS':''}</div>${t.bacter?`<div class="small">${bacterTxt()}</div>`:''}<div style="margin-top:4px">${dueBadge(t)}</div></div>
+    h+=`<div class="it" style="flex-wrap:wrap"><div class="body"><b>${esc(t.name)}</b>${notifOn()&&t.notify?' <span title="Notifica attiva">🔔</span>':''}<div class="small mut">${cadence(t)}${t.lastDone?` · ultima ${fdate(t.lastDone)}`:''}${t.auto==='test'?' · si spunta salvando un test':''}${t.auto==='tds'?' · si spunta salvando un TDS':''}</div>${t.bacter?`<div class="small">${bacterTxt()}</div>`:''}<div style="margin-top:4px">${dueBadge(t)}</div></div>
       <div class="acts"><button class="btn sm" data-done="${t.id}">Fatto</button><button class="btn sm sec" data-etask="${t.id}">✎</button>${delBtn('tasks',t.id)}</div>`;
     if(doneOpen===t.id && t.wc){
       h+=`<form id="fDone" data-id="${t.id}" style="width:100%;margin-top:8px;background:var(--card2);padding:10px;border-radius:10px">
@@ -891,7 +986,7 @@ function vDiario(){
 
 function vSet(){
   const s=S.settings;
-  let h=`<form id="fSet"><div class="card"><h2>Vasca</h2>
+  let h=vNotif()+`<form id="fSet"><div class="card"><h2>Vasca</h2>
     <div class="row"><div class="f"><label>Volume netto d'acqua (L)</label><input name="volume" inputmode="decimal" value="${esc(String(s.volume).replace('.',','))}"></div></div>
     <div class="small mut" style="margin-top:4px">Volume reale (vasca + sump, tolte rocce e sabbia). Influisce su tutti i calcoli.</div></div>
   <div class="card"><h2>Avvio e manutenzione</h2>
@@ -1013,7 +1108,7 @@ function drawTds(){
 let sub=''; const lastSub={};
 const SUBS={param:[['nuovo','Nuovo test'],['grafici','Grafici'],['storico','Storico']],vasca:[['animali','Animali e coralli'],['foto','Foto']]};
 const ALIAS={test:'param-nuovo',graf:'param-grafici',foto:'vasca-foto',animali:'vasca-animali',set:'impostazioni'};
-const MENU_VIEWS={dosi:'Dosaggio',manut:'Manutenzione',osmosi:'Osmosi',diario:'Diario',impostazioni:'Impostazioni',sync:'Sincronizzazione e backup'};
+const MENU_VIEWS={dosi:'Dosaggio',manut:'Manutenzione',osmosi:'Osmosi',diario:'Diario',impostazioni:'Impostazioni',sync:LOCAL_ONLY?'Backup':'Sincronizzazione e backup'};
 function segBar(v){ return `<div class="seg">${SUBS[v].map(([k,l])=>`<button class="${k===sub?'on':''}" data-sub="${k}">${l}</button>`).join('')}</div>` }
 function backBar(){ return `<div class="back"><button data-go="menu">‹ Menu</button><h1>${MENU_VIEWS[view]}</h1></div>` }
 const VIEWS={
@@ -1058,7 +1153,7 @@ function vMenu(){
     ['osmosi','🚰','Osmosi',lt?`ultimo TDS ${fmt(num(lt.tds),0)} ppm · ${tdsState(num(lt.tds))[1]}`:'TDS, resine, membrana'],
     ['diario','📓','Diario',`${S.events.length} ${S.events.length===1?'voce':'voci'} · cambi, dosi, note`],
     ['impostazioni','⚙️','Impostazioni','vasca, avvio, prodotti, range'],
-    ['sync','☁️','Sincronizzazione e backup',sbUser?syncLabel():'non collegato · backup JSON'],
+    LOCAL_ONLY?['sync','💾','Backup',lastBackup()?`ultimo ${fdate(lastBackup(),true)}`:'esporta o importa i tuoi dati']:['sync','☁️','Sincronizzazione e backup',sbUser?syncLabel():'non collegato · backup JSON'],
   ];
   return `<div style="margin-top:6px">`+items.map(([k,i,t,d])=>`<div class="mitem" data-go="${k}"><i>${i}</i><div class="t"><b>${t}</b><span>${d}</span></div><span class="mut">›</span></div>`).join('')+`</div>`;
 }
@@ -1079,6 +1174,15 @@ function openSheet(){
     else if(k==='lv'){ go('vasca-animali'); setTimeout(()=>{ lvEdit={}; lvPendingPhoto=null; render() },60) }
     else if(k==='maint'){ go('manut') }
     else { evPreset=k; go('diario') } });
+}
+function askExit(A){
+  const el=document.getElementById('sheet');
+  el.innerHTML=`<div class="pane" style="max-width:340px;text-align:center"><div style="font-size:30px;margin-bottom:6px">🐠</div><b style="font-size:17px">Vuoi uscire da Reef Log?</b>
+    <div class="small mut" style="margin-top:6px">I dati restano salvati sul telefono.</div>
+    <div class="row" style="margin-top:16px;justify-content:center"><button class="btn sec" id="exNo" style="flex:1">Resta</button><button class="btn" id="exYes" style="flex:1">Esci</button></div></div>`;
+  el.classList.remove('hide'); el.onclick=e=>{ if(e.target===el) closeSheet() };
+  document.getElementById('exNo').onclick=closeSheet;
+  document.getElementById('exYes').onclick=()=>{ closeSheet(); A.exitApp() };
 }
 function closeSheet(){ const el=document.getElementById('sheet'); if(el) el.classList.add('hide') }
 
@@ -1122,7 +1226,10 @@ function bind(){
     if(photoSel){ const i=photoSel.indexOf(id); if(i>=0) photoSel.splice(i,1); else photoSel.push(id);
       if(photoSel.length===2){ const [x,y]=photoSel; photoSel=null; render(); openCompare(x,y); return } render(); return }
     openViewer(id) });
-  bindSync(); bindAnimali();
+  bindSync(); bindAnimali(); bindNotif();
+  const wg=document.getElementById('wGo'), wx=document.getElementById('wX');
+  if(wg) wg.onclick=async()=>{ S.settings=Object.assign(clone(S.settings),{welcomed:true}); await saveSettings(); go('impostazioni') };
+  if(wx) wx.onclick=async()=>{ S.settings=Object.assign(clone(S.settings),{welcomed:true}); await saveSettings() };
   const sd=document.getElementById('seedTasks');
   if(sd) sd.onclick=async()=>{ sd.disabled=true; for(const t0 of DEFAULT_TASKS){ const t=Object.assign({id:uid()},clone(t0)); if(t.wc&&bacterOn()) Object.assign(t,{name:'Cambio acqua 10% + batteri',kind:'monthly',days:[15,30],bacter:true}); if(!await saveItem('tasks',t)) break } toast('Scadenze create'); render() };
   app.querySelectorAll('[data-done]').forEach(b=>b.onclick=async()=>{ const t=S.tasks.find(x=>x.id===b.dataset.done); if(!t) return;
@@ -1195,6 +1302,7 @@ function bind(){
       const photos=withPh? await photosForBackup() : undefined;
       const data=JSON.stringify({app:'reeflog',v:1,exported:new Date().toISOString(),tests:S.tests,doses:S.doses,events:S.events,tasks:S.tasks,livestock:S.livestock,settings:S.settings,photos},null,1);
       const fn=`reeflog-backup-${new Date().toISOString().slice(0,10)}.json`;
+      if(CAP()){ const r=await saveFile(fn,data,'application/json'); if(r==='shared'){ localStorage.setItem('reeflog.lastBackup',Date.now()); toast('Backup pronto'); render(); return } if(r==='abort') return }
       try{ const dl=window.claude?.use? await window.claude.use('downloads'):null; if(dl){ await dl.save({filename:fn,data}); toast('Backup pronto'); return } }catch(err){}
       try{ const f=new File([data],fn,{type:'application/json'});
         if(navigator.canShare&&navigator.canShare({files:[f]})){ await navigator.share({files:[f],title:'Backup Reef Log'}); localStorage.setItem('reeflog.lastBackup',Date.now()); toast('Backup condiviso'); render(); return } }catch(err){ if(err&&err.name==='AbortError') return }
@@ -1220,7 +1328,7 @@ document.getElementById('fileIn').onchange=async e=>{
   for(const c of ['tests','doses','events','tasks','livestock']) for(const it of (j[c]||[])){ if(it&&it.id&&(c==='tasks'||c==='livestock'||isFinite(it.ts))){ if(S.mode==='db'){ try{ await base.collection(c).doc(String(it.id)).set(it); n++ }catch(err){ handleErr(err); return } } else { const a=S[c]; const i=a.findIndex(x=>x.id===it.id); if(i>=0)a[i]=it; else a.push(it); n++ } } }
   let np=0; if(Array.isArray(j.photos)) for(const p of j.photos){ try{ if(!p||!p.id||!p.data) continue; const blob=await (await fetch(p.data)).blob(); await putPhoto({id:p.id,ts:p.ts,note:p.note||'',thumb:p.thumb,lv:p.lv||null,blob}); np++ }catch(err){} }
   if(np){ await loadPhotos(); n+=np }
-  if(j.settings){ S.settings=Object.assign(clone(DEF_SETTINGS),j.settings); await saveSettings() }
+  S.settings=Object.assign(clone(DEF_SETTINGS),j.settings||S.settings,{welcomed:true}); await saveSettings();
   if(S.mode==='local') lsSave();
   snoozeBackup();
   if(sbUser) enqueueAll();
@@ -1234,8 +1342,18 @@ function lvFormSnapshot(){ const f=document.getElementById('fLv'); return f?form
 function lvFormRestore(o){ const f=document.getElementById('fLv'); if(!f||!o) return; for(const [k,v] of Object.entries(o)){ const el=f.elements[k]; if(el) el.value=v } const sel=document.getElementById('lvSt'); if(sel) document.getElementById('lvEndF').classList.toggle('hide',sel.value==='alive') }
 document.getElementById('photoIn').onchange=e=>{ const fs=[...e.target.files]; e.target.value=''; if(fs.length) addPhotos(fs) };
 window.addEventListener('popstate',()=>{ if(!document.getElementById('ov').classList.contains('hide')){ closeOv(); render() } });
-applyRoute(); initStore(); loadPhotos().then(()=>{ if(S.photos.length) render(); initSync() });
-if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
+// Tasto indietro di Android (app nativa): chiude finestre, torna alla sezione precedente, poi esce
+(function(){ const C=CAP(); if(!C) return; const A=(C.Plugins&&C.Plugins.App)||(C.registerPlugin&&C.registerPlugin('App')); if(!A||!A.addListener) return;
+  A.addListener('backButton',()=>{
+    if(!document.getElementById('sheet').classList.contains('hide')){ closeSheet(); return }
+    if(!document.getElementById('ov').classList.contains('hide')){ closeOv(); render(); return }
+    if(view==='vasca'&&lvEdit){ lvEdit=null; lvPendingPhoto=null; render(); return }
+    if(view!=='home'){ const h0=location.hash; history.back(); setTimeout(()=>{ if(location.hash===h0) go('home') },200); return }
+    askExit(A);
+  });
+})();
+applyRoute(); initStore(); initNotif(); loadPhotos().then(()=>{ if(S.photos.length) render(); if(!LOCAL_ONLY) initSync() });
+if(!CAP() && 'serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
 if(navigator.storage&&navigator.storage.persist) navigator.storage.persist().catch(()=>{});
 </script>
 </body>
